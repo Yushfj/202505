@@ -1,0 +1,5 @@
+Dummy<changes>
+  <change>
+    <file>path/to/dummy_file.txt</file>
+    <description>Dummy description of changes.</description>
+    <content><![CDATA[Dummy content of the file.
