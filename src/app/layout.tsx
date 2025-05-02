@@ -2,7 +2,8 @@ import type {Metadata} from 'next';
 import {Geist, Geist_Mono} from 'next/font/google';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
-import { RouterTransition } from '@/components/router-transition';
+// Removed RouterTransition import as it might cause build issues with 404 prerendering
+// import { RouterTransition } from '@/components/router-transition';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -27,15 +28,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen`}>
-        <RouterTransition>
-            <main className="flex-grow">
-                {children}
-            </main>
-            <Toaster />
-            <footer className="w-full text-center py-4 text-xs text-white mt-auto relative z-10">
-                © {new Date().getFullYear()} Aayush Atishay Lal 北京化工大学
-            </footer>
-        </RouterTransition>
+        {/* Removed RouterTransition wrapper */}
+        <main className="flex-grow">
+            {children}
+        </main>
+        <Toaster />
+        <footer className="w-full text-center py-4 text-xs text-white mt-auto relative z-10 bg-black/30 backdrop-blur-sm"> {/* Added subtle background to footer for consistency */}
+            © {new Date().getFullYear()} Aayush Atishay Lal 北京化工大学
+        </footer>
       </body>
     </html>
   );
