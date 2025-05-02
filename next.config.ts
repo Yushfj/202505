@@ -19,9 +19,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  experimental: {
-    appDir: true,
-  },
+  // Removed deprecated experimental appDir option
 };
 
 export default nextConfig;
