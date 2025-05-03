@@ -336,9 +336,13 @@ const CreateWagesPage = () => {
   // --- Helper Functions ---
   const getCurrentWageRecordsForDb = (): WageRecord[] => {
     if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-      toast({ title: 'Error', description: 'Valid date range missing.', variant: 'destructive' }); // Use toast for error
-      console.error('Valid date range missing.'); // Log error
-      return [];
+        console.error('Valid date range missing.'); // Keep logging error
+        toast({ // Add user feedback
+          title: 'Date Range Required',
+          description: 'Please select a valid start and end date for the pay period.',
+          variant: 'destructive',
+        });
+        return [];
     }
     const records: WageRecord[] = [];
     employees.forEach(employee => {
@@ -381,8 +385,12 @@ const CreateWagesPage = () => {
   // --- Event Handlers (Save, Export) ---
   const handleSaveWages = async () => {
        if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-         toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' }); // Use toast for error
-         console.error('Please select a valid date range.'); // Log error
+          console.error('Please select a valid date range before saving.'); // Log error
+          toast({ // Add user feedback
+            title: 'Date Range Required',
+            description: 'Please select a valid start and end date before saving.',
+            variant: 'destructive',
+          });
          return;
        }
 
@@ -456,8 +464,12 @@ const CreateWagesPage = () => {
     // Function to handle exporting data (CSV or Excel)
     const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
         if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-            toast({ title: 'Error', description: 'Please select a valid date range before exporting.', variant: 'destructive' }); // Use toast for error
             console.error('Please select a valid date range before exporting.'); // Log error
+            toast({ // Add user feedback
+              title: 'Date Range Required',
+              description: 'Please select a valid date range before exporting.',
+              variant: 'destructive',
+            });
             return;
         }
 
@@ -585,42 +597,29 @@ const CreateWagesPage = () => {
 
   // --- Render ---
   return (
-    <div className="relative flex flex-col items-center min-h-screen text-white font-sans">
-      {/* Background Image */}
-      <Image
-        src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
-        alt="Background Image"
-        fill
-        style={{objectFit: 'cover'}}
-        className="absolute inset-0 w-full h-full -z-10"
-        priority
-      />
-      {/* Overlay */}
-      <div className="absolute inset-0 w-full h-full bg-black/60 -z-9" />
-
-      {/* Content Area */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center">
-        {/* Header */}
-        <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-8 sm:mb-10 md:mb-12">
-          <Link href="/wages" passHref>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-              <ArrowLeft className="h-5 w-5" />
-              <span className="sr-only">Back to Wages Management</span>
-            </Button>
-          </Link>
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100">
-            Calculate Wages
-          </h1>
-          <Link href="/dashboard" passHref>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-              <Home className="h-5 w-5" />
-              <span className="sr-only">Dashboard</span>
-            </Button>
-          </Link>
-        </header>
+    // Use a div wrapper for layout control
+    <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center min-h-screen text-white font-sans">
+        {/* Header - Make sticky */}
+         <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 bg-black/60 backdrop-blur-md">
+           <Link href="/wages" passHref className="ml-4"> {/* Added ml-4 */}
+             <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+               <ArrowLeft className="h-5 w-5" />
+               <span className="sr-only">Back to Wages Management</span>
+             </Button>
+           </Link>
+           <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
+             Calculate Wages
+           </h1>
+           <Link href="/dashboard" passHref className="mr-4"> {/* Added mr-4 */}
+             <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+               <Home className="h-5 w-5" />
+               <span className="sr-only">Dashboard</span>
+             </Button>
+           </Link>
+         </header>
 
         {/* Main Content */}
-        <main className="flex flex-col items-center flex-grow w-full pb-16">
+        <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6"> {/* Added pt-6 */}
           <Card className="w-full max-w-7xl bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 p-4"> {/* Increased max-width */}
              {/* Date Picker */}
             <CardHeader className="pb-2">
@@ -674,20 +673,20 @@ const CreateWagesPage = () => {
                     <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
                     <Table>
                         <TableHeader className="bg-white/10">
-                        <TableRow>
-                            <TableHead className="text-white border-r border-white/20">Employee</TableHead>
-                            <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
-                            <TableHead className="text-white border-r border-white/20">Account #</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* New Total Hours */}
-                            <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Gross Pay</TableHead> {/* Added Gross Pay */}
-                            <TableHead className="text-white text-right">Net Pay</TableHead>
-                        </TableRow>
+                            <TableRow>
+                                <TableHead className="text-white border-r border-white/20">Employee</TableHead>
+                                <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
+                                <TableHead className="text-white border-r border-white/20">Account #</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* New Total Hours */}
+                                <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
+                                <TableHead className="text-white border-r border-white/20 text-right">Gross Pay</TableHead> {/* Added Gross Pay */}
+                                <TableHead className="text-white text-right">Net Pay</TableHead>
+                            </TableRow>
                         </TableHeader>
                          <TableBody>
                            {employees.map(employee => {
@@ -843,9 +842,6 @@ const CreateWagesPage = () => {
           </Card>
         </main>
 
-      </div>
-        {/* Footer is handled by RootLayout */}
-
        {/* AlertDialog for admin password */}
         <AlertDialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
            <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
@@ -878,6 +874,7 @@ const CreateWagesPage = () => {
                </AlertDialogFooter>
            </AlertDialogContent>
         </AlertDialog>
+        {/* Footer is handled by RootLayout */}
     </div>
   );
 };

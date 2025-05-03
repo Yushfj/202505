@@ -1,10 +1,11 @@
+
 'use client';
 
 import Image from 'next/image';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Power } from 'lucide-react';
+import { Power, Loader2 } from 'lucide-react'; // Added Loader2
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -45,10 +46,10 @@ interface ChartDataPoint {
   totalNetPay: number;
 }
 
-
 const DashboardPage = () => {
   const [wageRecords, setWageRecords] = useState<WageRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState<{ [key: string]: boolean }>({}); // Loading state for navigation buttons
   const router = useRouter();
 
   // Fetch wage records
@@ -120,136 +121,133 @@ const DashboardPage = () => {
     router.push('/'); // Redirect to the login page
   };
 
+   const handleNavigation = (path: string) => {
+    setLoading((prev) => ({ ...prev, [path]: true }));
+    router.push(path);
+    // No need to setLoading back to false if navigating away
+  };
+
   return (
-    <div className="relative flex flex-col items-center min-h-screen text-white font-sans">
-      {/* Background Image */}
-      <Image
-        src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg" // Path to your image
-        alt="Background Image"
-        fill
-        style={{ objectFit: 'cover' }}
-        className="absolute inset-0 w-full h-full -z-10"
-        priority
-      />
+    // Removed outer div with background image and overlay, as it's handled globally
+    <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow min-h-screen text-white font-sans">
+        {/* Header Section - Made sticky */}
+        <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 sm:mb-16 bg-black/60 backdrop-blur-md">
+             {/* Logo */}
+             <div className="w-10 h-10 flex-shrink-0 ml-4 mr-4"> {/* Added margin right */}
+                <Image src="/logo.png" alt="Company Logo" width={40} height={40} />
+             </div>
 
-      {/* Dark Overlay */}
-      <div className="absolute inset-0 w-full h-full bg-black/70 -z-9" />
+             {/* Centered Title */}
+             <div className="flex-grow text-center">
+                 <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-gray-100">
+                     Lal&apos;s Motor Winders (FIJI) PTE Limited Dashboard
+                 </h1>
+             </div>
 
-      {/* Content Area */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow">
-        {/* Header Section */}
-        <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 sm:mb-16">
-          {/* Logo - Moved outside the centering div if you want it aligned left */}
-          <div className="w-10 h-10 flex-shrink-0">
-            <Image src="/logo.png" alt="Company Logo" width={40} height={40} />
-          </div>
+             {/* Logout Button */}
+             <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLogout}
+                className="text-red-400 hover:bg-white/10 hover:text-red-300 flex-shrink-0 ml-4 mr-4" // Added margin left & right
+                aria-label="Logout"
+             >
+                 <Power className="h-5 w-5" />
+                 <span className="sr-only">Logout</span>
+             </Button>
+         </header>
 
-          {/* Centered Title */}
-          <div className="flex-grow text-center">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-gray-100">
-              Lal&apos;s Motor Winders (FIJI) PTE Limited Dashboard
-            </h1>
-          </div>
+         {/* Content Area - Adjusted top margin/padding implicitly by sticky header */}
+        <div className="flex-grow flex flex-col items-center justify-start w-full pb-16 pt-6"> {/* Added pt-6 */}
 
-          {/* Logout Button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleLogout}
-            className="text-red-400 hover:bg-white/10 hover:text-red-300 flex-shrink-0"
-            aria-label="Logout"
-          >
-            <Power className="h-5 w-5" />
-            <span className="sr-only">Logout</span>
-          </Button>
-        </header>
+             {/* Navigation Section - Centered */}
+             <nav className="w-full flex justify-center items-center gap-5 py-4 mb-10">
+              <Button
+                onClick={() => handleNavigation('/employees')}
+                variant="secondary"
+                size="lg"
+                className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
+                disabled={loading['/employees']}
+               >
+                 {loading['/employees'] ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Employee Management'}
+               </Button>
+               <Button
+                 onClick={() => handleNavigation('/wages')}
+                 variant="secondary"
+                 size="lg"
+                 className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
+                 disabled={loading['/wages']}
+               >
+                  {loading['/wages'] ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Wages Management'}
+               </Button>
+               <Button
+                 onClick={() => handleNavigation('/admin')}
+                 variant="secondary"
+                 size="lg"
+                 className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
+                 disabled={loading['/admin']}
+               >
+                 {loading['/admin'] ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Administrator'}
+               </Button>
+             </nav>
 
-        {/* Navigation Section - Centered */}
-        <nav className="w-full flex justify-center items-center gap-5 py-4 mb-10">
-          <Button
-            asChild
-            variant="secondary" // Use a variant that looks good on the dark bg
-            size="lg"
-            className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
-          >
-            <Link href="/employees">Employee Management</Link>
-          </Button>
-          <Button
-            asChild
-            variant="secondary"
-            size="lg"
-            className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
-          >
-            <Link href="/wages">Wages Management</Link>
-          </Button>
-          <Button
-            asChild
-            variant="secondary"
-            size="lg"
-            className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
-          >
-            <Link href="/admin">Administrator</Link>
-          </Button>
-        </nav>
-
-        {/* Main Content Area - Graph Section */}
-        <main className="flex-grow flex items-center justify-center w-full pb-16">
-           <Card className="w-full max-w-4xl bg-black/40 backdrop-blur-sm border border-white/20 rounded-xl p-6 shadow-xl">
-             <CardHeader>
-               <CardTitle className="text-white text-center text-xl mb-4">
-                 Total Net Pay Trend per Pay Period
-               </CardTitle>
-             </CardHeader>
-             <CardContent>
-               {isLoading ? (
-                 <div className="text-center text-gray-400">Loading chart data...</div>
-               ) : chartData.length > 0 ? (
-                   <ResponsiveContainer width="100%" height={300}>
-                     <LineChart
-                       data={chartData}
-                       margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                     >
-                       <CartesianGrid strokeDasharray="3 3" stroke="#555" />
-                       <XAxis
-                         dataKey="payPeriod"
-                         stroke="#ccc"
-                         tick={{ fontSize: 10 }} // Smaller font size for x-axis labels
-                         angle={-30} // Angle labels if they overlap
-                         textAnchor="end" // Adjust anchor for angled labels
-                         height={50} // Increase height to accommodate angled labels
-                         interval={0} // Show all labels initially, adjust if needed
-                       />
-                       <YAxis stroke="#ccc" tickFormatter={(value) => `$${value.toFixed(0)}`} />
-                       <Tooltip
-                         contentStyle={{ backgroundColor: '#333', border: 'none', borderRadius: '5px' }}
-                         labelStyle={{ color: '#fff' }}
-                         itemStyle={{ color: '#88d1ff' }} // Light blue for tooltip item
-                         formatter={(value: number) => [`$${value.toFixed(2)}`, 'Total Net Pay']}
-                       />
-                       <Legend wrapperStyle={{ color: '#ccc' }} />
-                       <Line
-                         type="monotone"
-                         dataKey="totalNetPay"
-                         stroke="#88d1ff" // Light blue line color
-                         strokeWidth={2}
-                         dot={{ r: 4, fill: "#88d1ff" }} // Style points
-                         activeDot={{ r: 6, fill: "#fff", stroke: "#88d1ff" }} // Style active point
-                         name="Total Net Pay" // Legend name
-                       />
-                     </LineChart>
-                   </ResponsiveContainer>
-               ) : (
-                 <div className="text-center text-gray-400">No wage data available to display the chart.</div>
-               )}
-             </CardContent>
-           </Card>
-        </main>
-
+            {/* Main Content Area - Graph Section */}
+            {/* Changed to div as main is in RootLayout */}
+            <div className="flex-grow flex items-center justify-center w-full">
+               <Card className="w-full max-w-4xl bg-black/40 backdrop-blur-sm border border-white/20 rounded-xl p-6 shadow-xl">
+                 <CardHeader>
+                   <CardTitle className="text-white text-center text-xl mb-4">
+                     Total Net Pay Trend per Pay Period
+                   </CardTitle>
+                 </CardHeader>
+                 <CardContent>
+                   {isLoading ? (
+                     <div className="text-center text-gray-400">Loading chart data...</div>
+                   ) : chartData.length > 0 ? (
+                       <ResponsiveContainer width="100%" height={300}>
+                         <LineChart
+                           data={chartData}
+                           margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                         >
+                           <CartesianGrid strokeDasharray="3 3" stroke="#555" />
+                           <XAxis
+                             dataKey="payPeriod"
+                             stroke="#ccc"
+                             tick={{ fontSize: 10 }} // Smaller font size for x-axis labels
+                             angle={-30} // Angle labels if they overlap
+                             textAnchor="end" // Adjust anchor for angled labels
+                             height={50} // Increase height to accommodate angled labels
+                             interval={0} // Show all labels initially, adjust if needed
+                           />
+                           <YAxis stroke="#ccc" tickFormatter={(value) => `$${value.toFixed(0)}`} />
+                           <Tooltip
+                             contentStyle={{ backgroundColor: '#333', border: 'none', borderRadius: '5px' }}
+                             labelStyle={{ color: '#fff' }}
+                             itemStyle={{ color: '#88d1ff' }} // Light blue for tooltip item
+                             formatter={(value: number) => [`$${value.toFixed(2)}`, 'Total Net Pay']}
+                           />
+                           <Legend wrapperStyle={{ color: '#ccc' }} />
+                           <Line
+                             type="monotone"
+                             dataKey="totalNetPay"
+                             stroke="#88d1ff" // Light blue line color
+                             strokeWidth={2}
+                             dot={{ r: 4, fill: "#88d1ff" }} // Style points
+                             activeDot={{ r: 6, fill: "#fff", stroke: "#88d1ff" }} // Style active point
+                             name="Total Net Pay" // Legend name
+                           />
+                         </LineChart>
+                       </ResponsiveContainer>
+                   ) : (
+                     <div className="text-center text-gray-400">No wage data available to display the chart.</div>
+                   )}
+                 </CardContent>
+               </Card>
+            </div>
+        </div>
         {/* Footer is handled by RootLayout */}
-      </div>
     </div>
   );
 };
 
 export default DashboardPage;
-

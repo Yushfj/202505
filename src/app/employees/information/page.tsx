@@ -2,10 +2,10 @@
 
 import Image from 'next/image';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
-import {useEffect, useState, useCallback} from 'react'; // Added useCallback
-import {Trash2, Edit, Home, ArrowLeft, Loader2} from 'lucide-react'; // Added Loader2
+import {useEffect, useState, useCallback} from 'react';
+import {Trash2, Edit, Home, ArrowLeft, Loader2} from 'lucide-react';
 import {Button} from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast import
+import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-  AlertDialogFooter, // Ensure AlertDialogFooter is imported
+  AlertDialogFooter,
 } from '@/components/ui/alert-dialog';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
@@ -131,50 +131,26 @@ const EmployeeInformationPage = () => {
   // Render loading state
   if (isLoading) {
       return (
-          <div className="relative flex flex-col items-center justify-center min-h-screen font-sans text-white">
-              {/* Background Image */}
-              <Image
-                src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
-                alt="Background Image"
-                fill
-                style={{objectFit: 'cover'}}
-                className="absolute top-0 left-0 w-full h-full -z-10"
-                priority
-              />
-              {/* Overlay */}
-              <div className="absolute top-0 left-0 w-full h-full bg-black opacity-50 -z-9" />
-              {/* Loading Indicator */}
-               <div className="relative z-10 text-xl flex items-center">
-                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                 Loading employee data...
-               </div>
-                {/* Footer is handled by RootLayout */}
-          </div>
+          // Use a div wrapper for layout control
+           <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-center min-h-screen text-white font-sans">
+               {/* Loading Indicator */}
+                <div className="text-xl flex items-center">
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Loading employee data...
+                </div>
+                 {/* Footer is handled by RootLayout */}
+           </div>
       );
   }
 
   // Render main content
   return (
-    <div className="relative flex flex-col items-center min-h-screen font-sans text-white">
-      {/* Background Image */}
-      <Image
-        src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
-        alt="Background Image"
-        fill
-        style={{objectFit: 'cover'}}
-        className="absolute top-0 left-0 w-full h-full -z-10"
-        priority
-      />
+    // Use a div wrapper for layout control
+       <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center min-h-screen text-white font-sans">
 
-      {/* Overlay */}
-      <div className="absolute top-0 left-0 w-full h-full bg-black opacity-50 -z-9" />
-
-      {/* Content */}
-       <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center">
-
-         {/* Header */}
-         <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-8 sm:mb-10">
-            <Link href="/employees" passHref>
+         {/* Header - Make sticky */}
+         <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-8 sm:mb-10 bg-black/60 backdrop-blur-md">
+            <Link href="/employees" passHref className="ml-4"> {/* Added ml-4 */}
                 <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
                     <ArrowLeft className="h-5 w-5" />
                     <span className="sr-only">Back to Employee Management</span>
@@ -183,7 +159,7 @@ const EmployeeInformationPage = () => {
             <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
                 Employee Information
             </h1>
-            <Link href="/dashboard" passHref>
+            <Link href="/dashboard" passHref className="mr-4"> {/* Added mr-4 */}
                 <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
                     <Home className="h-5 w-5" />
                     <span className="sr-only">Dashboard</span>
@@ -192,7 +168,7 @@ const EmployeeInformationPage = () => {
         </header>
 
         {/* Main Content Area */}
-        <main className="w-full flex-grow overflow-y-auto pb-16">
+        <main className="w-full flex-grow overflow-y-auto pb-16 pt-6"> {/* Added pt-6 */}
             {employees.length === 0 ? (
                 <Card className="w-full max-w-md mx-auto mt-10 bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40">
                      <CardContent className="p-6">
@@ -417,12 +393,9 @@ const EmployeeInformationPage = () => {
                  </div>
             )}
          </main>
-        </div>
          {/* Footer is handled by RootLayout */}
     </div>
   );
 };
 
 export default EmployeeInformationPage;
-
-

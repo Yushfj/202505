@@ -408,253 +408,241 @@ const WagesRecordsPage = () => {
 
   // --- Render ---
   return (
-    <div className="relative flex flex-col items-center min-h-screen text-white font-sans">
-      {/* Background Image */}
-      <Image
-        src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
-        alt="Background Image"
-        fill
-        style={{objectFit: 'cover'}}
-        className="absolute inset-0 w-full h-full -z-10"
-        priority
-      />
-      {/* Dark Overlay */}
-      <div className="absolute inset-0 w-full h-full bg-black/70 -z-9" />
+    // Use a div wrapper for layout control
+     <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow min-h-screen text-white font-sans">
+      {/* Header - Make sticky */}
+       <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-6 bg-black/60 backdrop-blur-md">
+         <Link href="/wages" passHref className="ml-4"> {/* Added ml-4 */}
+           <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+             <ArrowLeft className="h-5 w-5" />
+             <span className="sr-only">Back to Wages Management</span>
+           </Button>
+         </Link>
+         <h1 className="text-xl sm:text-2xl font-semibold text-center text-gray-100 flex-grow px-4">
+           Wage Records
+         </h1>
+         <div className="flex items-center gap-2 mr-4"> {/* Added mr-4 */}
+           <Link href="/dashboard" passHref>
+             <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+               <Home className="h-5 w-5" />
+               <span className="sr-only">Dashboard</span>
+             </Button>
+           </Link>
+           <Button
+             variant="ghost" size="icon" onClick={handleLogout}
+             className="text-red-400 hover:bg-white/10 hover:text-red-300" aria-label="Logout"
+           >
+             <Power className="h-5 w-5" />
+             <span className="sr-only">Logout</span>
+           </Button>
+         </div>
+       </header>
 
-      {/* Content Area */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow">
-        {/* Header */}
-        <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-6">
-          <Link href="/wages" passHref>
-            <Button variant="ghost" size="icon" className="text-gray-200 hover:bg-white/10">
-              <ArrowLeft className="h-5 w-5" />
-              <span className="sr-only">Back to Wages Management</span>
-            </Button>
-          </Link>
-          <h1 className="text-xl sm:text-2xl font-semibold text-center text-gray-100 flex-grow px-4">
-            Wage Records
-          </h1>
-          <div className="flex items-center gap-2">
-            <Link href="/dashboard" passHref>
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-                <Home className="h-5 w-5" />
-                <span className="sr-only">Dashboard</span>
-              </Button>
-            </Link>
-            <Button
-              variant="ghost" size="icon" onClick={handleLogout}
-              className="text-red-400 hover:bg-white/10 hover:text-red-300" aria-label="Logout"
-            >
-              <Power className="h-5 w-5" />
-              <span className="sr-only">Logout</span>
-            </Button>
-          </div>
-        </header>
-
-        {/* Main Content Card */}
-        <Card className="w-full bg-black/50 backdrop-blur-sm border border-white/20 rounded-xl shadow-xl mb-8 flex-grow">
-          <CardHeader>
-            <CardTitle className="text-white text-center text-lg sm:text-xl">Wage Records Summary</CardTitle>
-            {/* Date Range Picker */}
-            <div className="flex justify-center mt-4">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    id="date" variant={'outline'}
-                    className={cn(
-                      'w-[240px] sm:w-[300px] justify-start text-left font-normal text-gray-900 bg-white hover:bg-gray-100',
-                       // Highlight if a range is selected
-                      !dateRange?.from && 'text-muted-foreground'
-                    )}
-                    // Clear range button (optional)
-                    onClick={() => { if(dateRange?.from) setDateRange(undefined); }}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {dateRange?.from && isValid(dateRange.from) ? (
-                      dateRange.to && isValid(dateRange.to) ? (
-                        <>{format(dateRange.from, 'LLL dd, y')} - {format(dateRange.to, 'LLL dd, y')}</>
-                      ) : (
-                        format(dateRange.from, 'LLL dd, y')
-                      )
-                    ) : (
-                      <span>Pick a date range (or view all)</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 bg-white text-black" align="center">
-                  <Calendar
-                    initialFocus mode="range" defaultMonth={dateRange?.from}
-                    selected={dateRange} onSelect={setDateRange} numberOfMonths={1} // Simpler one month view
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-          </CardHeader>
-
-          <CardContent>
-            {isLoading ? (
-                <div className="text-center text-white py-10 flex items-center justify-center">
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading records...
-                </div>
-            ) : (
-                <>
-                 {/* Pay Period Summary Table */}
-                 <div className="border border-white/20 rounded-lg overflow-hidden max-h-[300px] overflow-y-auto mb-6">
-                 <Table>
-                     <TableHeader className="bg-white/10 sticky top-0 z-10">
-                     <TableRow className="hover:bg-transparent">
-                         <TableHead className="text-white border-r border-white/20">Pay Period</TableHead>
-                         <TableHead className="text-white border-r border-white/20 text-right">Total Wages</TableHead>
-                         <TableHead className="text-white text-center">Actions</TableHead>
-                     </TableRow>
-                     </TableHeader>
-                     <TableBody>
-                     {groupedWageRecords.length > 0 ? (
-                         groupedWageRecords.map((group) => (
-                         <TableRow
-                             key={group.payPeriodKey}
-                             onClick={() => handlePeriodSelect(group.payPeriodKey)}
-                             className={cn(
-                             "cursor-pointer border-t border-white/10 hover:bg-white/15",
-                             selectedPayPeriodKey === group.payPeriodKey && "bg-white/25 font-semibold" // Highlight selected
-                             )}
-                         >
-                             <TableCell className="font-medium text-white border-r border-white/20">{`${format(group.dateFrom, 'MMM dd, yyyy')} - ${format(group.dateTo, 'MMM dd, yyyy')}`}</TableCell>
-                             <TableCell className="text-white border-r border-white/20 text-right">${group.totalWages.toFixed(2)}</TableCell>
-                             <TableCell className="text-center">
-                                 <Button
-                                     variant="destructive"
-                                     size="sm"
-                                     onClick={(e) => {
-                                          e.stopPropagation(); // Prevent row selection when clicking delete
-                                          initiateDelete(group.payPeriodKey);
-                                     }}
-                                     className="h-7 px-2"
-                                     disabled={isDeleting && selectedPayPeriodKey === group.payPeriodKey} // Disable while deleting this period
-                                 >
-                                     {isDeleting && selectedPayPeriodKey === group.payPeriodKey ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <Trash2 className="h-3.5 w-3.5" />}
-                                     <span className="sr-only">Delete Period</span>
-                                 </Button>
-                             </TableCell>
-                         </TableRow>
-                         ))
-                     ) : (
-                         <TableRow>
-                         <TableCell colSpan={3} className="text-center text-gray-400 py-4">
-                             No wage records found{dateRange?.from ? " for the selected period" : "."}
-                         </TableCell>
-                         </TableRow>
+      {/* Main Content Card */}
+      <main className="flex-grow w-full pb-16 pt-6"> {/* Added pt-6 */}
+         <Card className="w-full bg-black/50 backdrop-blur-sm border border-white/20 rounded-xl shadow-xl mb-8 flex-grow">
+           <CardHeader>
+             <CardTitle className="text-white text-center text-lg sm:text-xl">Wage Records Summary</CardTitle>
+             {/* Date Range Picker */}
+             <div className="flex justify-center mt-4">
+               <Popover>
+                 <PopoverTrigger asChild>
+                   <Button
+                     id="date" variant={'outline'}
+                     className={cn(
+                       'w-[240px] sm:w-[300px] justify-start text-left font-normal text-gray-900 bg-white hover:bg-gray-100',
+                        // Highlight if a range is selected
+                       !dateRange?.from && 'text-muted-foreground'
                      )}
-                     </TableBody>
-                 </Table>
-                 </div>
-
-                 {/* Wage Details Section (Visible when a period is selected) */}
-                 {selectedPayPeriodKey && (
-                 <div className="mt-6">
-                     <h3 className="text-lg font-medium text-white mb-4 text-center">
-                     Wage Details for {
-                         groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey) ?
-                         `${format(groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey)!.dateFrom, 'MMM dd, yyyy')} - ${format(groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey)!.dateTo, 'MMM dd, yyyy')}`
-                         : 'Selected Period'
-                     }
-                     </h3>
-                     <div className="border border-white/20 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
-                     <Table>
-                         <TableHeader className="bg-white/10 sticky top-0 z-10">
-                         <TableRow className="hover:bg-transparent">
-                             <TableHead className="text-white border-r border-white/20">Employee</TableHead>
-                             <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
-                             <TableHead className="text-white border-r border-white/20">Account #</TableHead>
-                             <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
-                             <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* Updated Header */}
-                             <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead> {/* Updated Header */}
-                             <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead> {/* Added O/T Header */}
-                             <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
-                             <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
-                             <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
-                             <TableHead className="text-white border-r border-white/20 text-right">Gross</TableHead>
-                             <TableHead className="text-white text-right">Net</TableHead>
-                         </TableRow>
-                         </TableHeader>
-                         <TableBody>
-                         {selectedPeriodRecords.map((record) => {
-                             const employee = employees.find(emp => emp.id === record.employeeId);
-                             const displayBankCode = employee?.paymentMethod === 'online' ? (employee.bankCode || 'N/A') : 'Cash';
-                             const displayAccountNum = employee?.paymentMethod === 'online' ? (employee.bankAccountNumber || 'N/A') : 'N/A';
-                             const displayFNPF = employee?.fnpfEligible ? `$${record.fnpfDeduction?.toFixed(2)}` : 'N/A';
-
-                             return (
-                             <TableRow key={record.employeeId + record.dateFrom} className="border-t border-white/10 hover:bg-white/5">
-                                 <TableCell className="text-white border-r border-white/20">{record.employeeName}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20">{displayBankCode}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20">{displayAccountNum}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20 text-right">${record.hourlyWage?.toFixed(2)}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20 text-right">{record.totalHours?.toFixed(2)}</TableCell> {/* Display Total Hours */}
-                                 <TableCell className="text-white border-r border-white/20 text-right">{record.hoursWorked?.toFixed(2)}</TableCell> {/* Display Normal Hours */}
-                                 <TableCell className="text-white border-r border-white/20 text-right">{record.overtimeHours?.toFixed(2) || '0.00'}</TableCell> {/* Display O/T Hours */}
-                                 <TableCell className="text-white border-r border-white/20 text-right">${record.mealAllowance?.toFixed(2)}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20 text-right">{displayFNPF}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20 text-right">${record.otherDeductions?.toFixed(2)}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20 text-right">${record.grossPay?.toFixed(2)}</TableCell>
-                                 <TableCell className="text-white text-right">${record.netPay?.toFixed(2)}</TableCell>
-                             </TableRow>
-                             );
-                         })}
-                         </TableBody>
-                     </Table>
-                     </div>
-
-                     {/* Action Buttons for Selected Period */}
-                     <div className="flex flex-wrap gap-3 mt-6 justify-center">
-                     <Button variant="secondary" onClick={() => handleExport('BSP')} className="min-w-[140px] hover:bg-gray-700/80" disabled={!selectedPayPeriodKey}>
-                         <FileDown className="mr-2 h-4 w-4" /> BSP CSV
-                     </Button>
-                     <Button variant="secondary" onClick={() => handleExport('BRED')} className="min-w-[140px] hover:bg-gray-700/80" disabled={!selectedPayPeriodKey}>
-                         <FileDown className="mr-2 h-4 w-4" /> BRED CSV
-                     </Button>
-                     <Button variant="secondary" onClick={() => handleExport('Excel')} className="min-w-[140px] hover:bg-gray-700/80" disabled={!selectedPayPeriodKey}>
-                         <FileText className="mr-2 h-4 w-4" /> Excel
-                     </Button>
-                     {/* Delete button is now on the period row */}
-                     </div>
-                 </div>
-                 )}
-                 </>
-             )}
-          </CardContent>
-        </Card>
-
-         {/* AlertDialog for delete confirmation */}
-         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-             <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
-             <AlertDialogHeader>
-                 <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
-                 <AlertDialogDescription className="text-gray-300">
-                 Delete wage records for the selected period? This cannot be undone. Enter admin password.
-                 </AlertDialogDescription>
-             </AlertDialogHeader>
-             <div className="grid gap-2">
-                 <Label htmlFor="password-delete" className="text-gray-300">Admin Password</Label>
-                 <Input
-                 id="password-delete" type="password" value={deletePassword}
-                 onChange={e => setDeletePassword(e.target.value)}
-                 className="bg-gray-800 border-white/20 text-white"
-                 onKeyPress={(e) => { if (e.key === 'Enter') handleDeleteRecords(); }}
-                 />
+                     // Clear range button (optional)
+                     onClick={() => { if(dateRange?.from) setDateRange(undefined); }}
+                   >
+                     <CalendarIcon className="mr-2 h-4 w-4" />
+                     {dateRange?.from && isValid(dateRange.from) ? (
+                       dateRange.to && isValid(dateRange.to) ? (
+                         <>{format(dateRange.from, 'LLL dd, y')} - {format(dateRange.to, 'LLL dd, y')}</>
+                       ) : (
+                         format(dateRange.from, 'LLL dd, y')
+                       )
+                     ) : (
+                       <span>Pick a date range (or view all)</span>
+                     )}
+                   </Button>
+                 </PopoverTrigger>
+                 <PopoverContent className="w-auto p-0 bg-white text-black" align="center">
+                   <Calendar
+                     initialFocus mode="range" defaultMonth={dateRange?.from}
+                     selected={dateRange} onSelect={setDateRange} numberOfMonths={1} // Simpler one month view
+                   />
+                 </PopoverContent>
+               </Popover>
              </div>
-             <AlertDialogFooter>
-                 <AlertDialogCancel onClick={() => {setShowDeleteDialog(false); setDeletePassword(''); setSelectedPayPeriodKey(null);}} className="border-white/20 text-white hover:bg-white/10">Cancel</AlertDialogCancel>
-                 <AlertDialogAction onClick={handleDeleteRecords} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
-                    {isDeleting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...</> : 'Delete'}
-                 </AlertDialogAction>
-             </AlertDialogFooter>
-             </AlertDialogContent>
-         </AlertDialog>
+           </CardHeader>
 
-        {/* Footer is handled by RootLayout */}
-      </div>
-    </div>
+           <CardContent>
+             {isLoading ? (
+                 <div className="text-center text-white py-10 flex items-center justify-center">
+                     <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading records...
+                 </div>
+             ) : (
+                 <>
+                  {/* Pay Period Summary Table */}
+                  <div className="border border-white/20 rounded-lg overflow-hidden max-h-[300px] overflow-y-auto mb-6">
+                  <Table>
+                      <TableHeader className="bg-white/10 sticky top-0 z-10">
+                          <TableRow className="hover:bg-transparent">
+                              <TableHead className="text-white border-r border-white/20">Pay Period</TableHead>
+                              <TableHead className="text-white border-r border-white/20 text-right">Total Wages</TableHead>
+                              <TableHead className="text-white text-center">Actions</TableHead>
+                          </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                      {groupedWageRecords.length > 0 ? (
+                          groupedWageRecords.map((group) => (
+                          <TableRow
+                              key={group.payPeriodKey}
+                              onClick={() => handlePeriodSelect(group.payPeriodKey)}
+                              className={cn(
+                              "cursor-pointer border-t border-white/10 hover:bg-white/15",
+                              selectedPayPeriodKey === group.payPeriodKey && "bg-white/25 font-semibold" // Highlight selected
+                              )}
+                          >
+                              <TableCell className="font-medium text-white border-r border-white/20">{`${format(group.dateFrom, 'MMM dd, yyyy')} - ${format(group.dateTo, 'MMM dd, yyyy')}`}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${group.totalWages.toFixed(2)}</TableCell>
+                              <TableCell className="text-center">
+                                  <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      onClick={(e) => {
+                                           e.stopPropagation(); // Prevent row selection when clicking delete
+                                           initiateDelete(group.payPeriodKey);
+                                      }}
+                                      className="h-7 px-2"
+                                      disabled={isDeleting && selectedPayPeriodKey === group.payPeriodKey} // Disable while deleting this period
+                                  >
+                                      {isDeleting && selectedPayPeriodKey === group.payPeriodKey ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <Trash2 className="h-3.5 w-3.5" />}
+                                      <span className="sr-only">Delete Period</span>
+                                  </Button>
+                              </TableCell>
+                          </TableRow>
+                          ))
+                      ) : (
+                          <TableRow>
+                          <TableCell colSpan={3} className="text-center text-gray-400 py-4">
+                              No wage records found{dateRange?.from ? " for the selected period" : "."}
+                          </TableCell>
+                          </TableRow>
+                      )}
+                      </TableBody>
+                  </Table>
+                  </div>
+
+                  {/* Wage Details Section (Visible when a period is selected) */}
+                  {selectedPayPeriodKey && (
+                  <div className="mt-6">
+                      <h3 className="text-lg font-medium text-white mb-4 text-center">
+                      Wage Details for {
+                          groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey) ?
+                          `${format(groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey)!.dateFrom, 'MMM dd, yyyy')} - ${format(groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey)!.dateTo, 'MMM dd, yyyy')}`
+                          : 'Selected Period'
+                      }
+                      </h3>
+                      <div className="border border-white/20 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
+                      <Table>
+                          <TableHeader className="bg-white/10 sticky top-0 z-10">
+                              <TableRow className="hover:bg-transparent">
+                                  <TableHead className="text-white border-r border-white/20">Employee</TableHead>
+                                  <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
+                                  <TableHead className="text-white border-r border-white/20">Account #</TableHead>
+                                  <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
+                                  <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* Updated Header */}
+                                  <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead> {/* Updated Header */}
+                                  <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead> {/* Added O/T Header */}
+                                  <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
+                                  <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
+                                  <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
+                                  <TableHead className="text-white border-r border-white/20 text-right">Gross</TableHead>
+                                  <TableHead className="text-white text-right">Net</TableHead>
+                              </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                          {selectedPeriodRecords.map((record) => {
+                              const employee = employees.find(emp => emp.id === record.employeeId);
+                              const displayBankCode = employee?.paymentMethod === 'online' ? (employee.bankCode || 'N/A') : 'Cash';
+                              const displayAccountNum = employee?.paymentMethod === 'online' ? (employee.bankAccountNumber || 'N/A') : 'N/A';
+                              const displayFNPF = employee?.fnpfEligible ? `$${record.fnpfDeduction?.toFixed(2)}` : 'N/A';
+
+                              return (
+                              <TableRow key={record.id} className="border-t border-white/10 hover:bg-white/5">
+                                  <TableCell className="text-white border-r border-white/20">{record.employeeName}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20">{displayBankCode}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20">{displayAccountNum}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20 text-right">${record.hourlyWage?.toFixed(2)}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20 text-right">{record.totalHours?.toFixed(2)}</TableCell> {/* Display Total Hours */}
+                                  <TableCell className="text-white border-r border-white/20 text-right">{record.hoursWorked?.toFixed(2)}</TableCell> {/* Display Normal Hours */}
+                                  <TableCell className="text-white border-r border-white/20 text-right">{record.overtimeHours?.toFixed(2) || '0.00'}</TableCell> {/* Display O/T Hours */}
+                                  <TableCell className="text-white border-r border-white/20 text-right">${record.mealAllowance?.toFixed(2)}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20 text-right">{displayFNPF}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20 text-right">${record.otherDeductions?.toFixed(2)}</TableCell>
+                                  <TableCell className="text-white border-r border-white/20 text-right">${record.grossPay?.toFixed(2)}</TableCell>
+                                  <TableCell className="text-white text-right">${record.netPay?.toFixed(2)}</TableCell>
+                              </TableRow>
+                              );
+                          })}
+                          </TableBody>
+                      </Table>
+                      </div>
+
+                      {/* Action Buttons for Selected Period */}
+                      <div className="flex flex-wrap gap-3 mt-6 justify-center">
+                      <Button variant="secondary" onClick={() => handleExport('BSP')} className="min-w-[140px] hover:bg-gray-700/80" disabled={!selectedPayPeriodKey}>
+                          <FileDown className="mr-2 h-4 w-4" /> BSP CSV
+                      </Button>
+                      <Button variant="secondary" onClick={() => handleExport('BRED')} className="min-w-[140px] hover:bg-gray-700/80" disabled={!selectedPayPeriodKey}>
+                          <FileDown className="mr-2 h-4 w-4" /> BRED CSV
+                      </Button>
+                      <Button variant="secondary" onClick={() => handleExport('Excel')} className="min-w-[140px] hover:bg-gray-700/80" disabled={!selectedPayPeriodKey}>
+                          <FileText className="mr-2 h-4 w-4" /> Excel
+                      </Button>
+                      {/* Delete button is now on the period row */}
+                      </div>
+                  </div>
+                  )}
+                  </>
+              )}
+           </CardContent>
+         </Card>
+       </main>
+
+        {/* AlertDialog for delete confirmation */}
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+            <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
+            <AlertDialogHeader>
+                <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+                <AlertDialogDescription className="text-gray-300">
+                Delete wage records for the selected period? This cannot be undone. Enter admin password.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="grid gap-2">
+                <Label htmlFor="password-delete" className="text-gray-300">Admin Password</Label>
+                <Input
+                id="password-delete" type="password" value={deletePassword}
+                onChange={e => setDeletePassword(e.target.value)}
+                className="bg-gray-800 border-white/20 text-white"
+                onKeyPress={(e) => { if (e.key === 'Enter') handleDeleteRecords(); }}
+                />
+            </div>
+            <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => {setShowDeleteDialog(false); setDeletePassword(''); setSelectedPayPeriodKey(null);}} className="border-white/20 text-white hover:bg-white/10">Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteRecords} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
+                   {isDeleting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...</> : 'Delete'}
+                </AlertDialogAction>
+            </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+
+       {/* Footer is handled by RootLayout */}
+     </div>
   );
 };
 

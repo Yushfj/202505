@@ -7,7 +7,7 @@ import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import Image from 'next/image';
 import {Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue} from '@/components/ui/select';
-import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast import
+import { useToast } from '@/hooks/use-toast';
 import {useRouter} from 'next/navigation';
 import {RadioGroup, RadioGroupItem} from '@/components/ui/radio-group';
 import { Checkbox } from "@/components/ui/checkbox"
@@ -262,295 +262,279 @@ const ChangeEmployeeInfoPage = () => {
   // Render loading state for employee list
   if (isLoadingEmployees) {
     return (
-        <div className="relative flex flex-col items-center justify-center min-h-screen font-sans text-white">
-            <Image
-                src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
-                alt="Background Image" fill style={{objectFit: 'cover'}}
-                className="absolute top-0 left-0 w-full h-full -z-10" priority />
-            <div className="absolute top-0 left-0 w-full h-full bg-black opacity-50 -z-9" />
-            <div className="relative z-10 text-xl flex items-center">
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Loading employees...
-            </div>
-             {/* Footer is handled by RootLayout */}
-        </div>
+        // Use a div wrapper for layout control
+         <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-center min-h-screen text-white font-sans">
+             <div className="text-xl flex items-center">
+                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                 Loading employees...
+             </div>
+              {/* Footer is handled by RootLayout */}
+         </div>
     );
   }
 
   // Render the main page content
   return (
-     <div className="relative flex flex-col items-center min-h-screen font-sans text-white">
-      {/* Background Image */}
-      <Image
-        src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
-        alt="Background Image"
-        fill
-        style={{objectFit: 'cover'}}
-        className="absolute top-0 left-0 w-full h-full -z-10"
-        priority
-      />
+     // Use a div wrapper for layout control
+     <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-start min-h-screen text-white font-sans">
+         {/* Header - Make sticky */}
+         <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 bg-black/60 backdrop-blur-md">
+             <Link href="/employees" className="ml-4">
+                 <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+                     <ArrowLeft className="h-5 w-5" />
+                     <span className="sr-only">Back to Employee Management</span>
+                 </Button>
+             </Link>
+             <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
+                 Change Employee Information
+             </h1>
+             <Link href="/dashboard" className="mr-4">
+                 <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+                     <Home className="h-5 w-5" />
+                     <span className="sr-only">Home</span>
+                 </Button>
+             </Link>
+         </header>
 
-      {/* Overlay */}
-      <div className="absolute top-0 left-0 w-full h-full bg-black opacity-50 -z-9" />
+         {/* Main Content */}
+         <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6"> {/* Added pt-6 */}
+             <Card className="w-full max-w-md bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40">
+                 <CardContent className="p-6"> {/* Adjusted padding */}
 
-       {/* Content Area */}
-        <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-center py-10">
-
-          <Card className="w-full max-w-md bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40">
-            <CardHeader className="relative">
-                {/* Changed Back link to Employee Management page */}
-                 <Link href="/employees" className="absolute top-4 left-4">
-                    <Button variant="ghost" size="icon">
-                        <ArrowLeft className="h-5 w-5 text-white" />
-                        <span className="sr-only">Back to Employee Management</span>
-                    </Button>
-                 </Link>
-              <CardTitle className="text-2xl text-white text-center pt-2">
-                Change Employee Information
-              </CardTitle>
-                 <Link href="/dashboard" className="absolute top-4 right-4">
-                    <Button variant="ghost" size="icon">
-                        <Home className="h-5 w-5 text-white" />
-                        <span className="sr-only">Home</span>
-                    </Button>
-                </Link>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-
-              {/* Employee Selection Dropdown */}
-               <div className="grid gap-2">
-                  <Label htmlFor="employee-select" className="text-white">Select Employee</Label>
-                  <Select onValueChange={handleEmployeeSelect} value={selectedEmployeeId || ''}>
-                    <SelectTrigger id="employee-select" className="bg-white/10 text-white placeholder-gray-400 border-white/20">
-                      <SelectValue placeholder="Choose an employee to edit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Employees</SelectLabel>
-                        {allEmployees.length > 0 ? (
-                          allEmployees.map(emp => (
-                            <SelectItem key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.branch})
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="no-employees" disabled>
-                            No employees found
-                          </SelectItem>
-                        )}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-              {/* Loading indicator for employee details */}
-              {isLoadingDetails && (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin text-white" />
-                  <span className="text-white">Loading employee details...</span>
-                </div>
-              )}
-
-              {/* Conditionally render form when employee is selected and loaded */}
-              {employee && !isLoadingDetails && (
-                <form onSubmit={handleSubmit}>
-                   {/* Branch Selection */}
-                   <div className="grid gap-2 mt-4">
-                    <Label className="text-white font-semibold">Select Branch</Label>
-                    <RadioGroup
-                      onValueChange={(value) => handleSelectChange('branch', value)}
-                      value={employee.branch}
-                      className="grid grid-cols-2 gap-4"
-                    >
-                        <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="labasa" id="r-branch-labasa" className="border-white text-primary" />
-                            <Label htmlFor="r-branch-labasa" className="text-white cursor-pointer">Labasa Branch</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="suva" id="r-branch-suva" className="border-white text-primary" />
-                            <Label htmlFor="r-branch-suva" className="text-white cursor-pointer">Suva Branch</Label>
-                        </div>
-                    </RadioGroup>
-                  </div>
-
-                  {/* Employee Name */}
-                  <div className="grid gap-2 mt-4">
-                    <Label htmlFor="name" className="text-white">
-                        Employee Name <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                        id="name"
-                        type="text"
-                        placeholder="Enter full name"
-                        value={employee.name}
-                        onChange={handleChange}
-                        required
-                        className="bg-white/10 text-white placeholder-gray-400 border-white/20"
-                    />
-                  </div>
-
-                  {/* Employee Position */}
-                  <div className="grid gap-2">
-                    <Label htmlFor="position" className="text-white">
-                        Employee Position <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                        id="position"
-                        type="text"
-                        placeholder="e.g., Sales Assistant"
-                        value={employee.position}
-                        onChange={handleChange}
-                        required
-                        className="bg-white/10 text-white placeholder-gray-400 border-white/20"
-                    />
-                  </div>
-
-                  {/* Hourly Wage */}
-                  <div className="grid gap-2">
-                    <Label htmlFor="hourlyWage" className="text-white">
-                        Hourly Wage ($) <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                        id="hourlyWage"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="e.g., 15.50"
-                        value={employee.hourlyWage || ""} // Provide default value
-                        onChange={handleChange}
-                        required
-                        className="bg-white/10 text-white placeholder-gray-400 border-white/20"
-                    />
-                  </div>
-
-                   {/* TIN No */}
-                   <div className="grid gap-2">
-                     <Label htmlFor="tinNo" className="text-white">
-                         TIN No
-                     </Label>
-                     <Input
-                         id="tinNo"
-                         type="text"
-                         placeholder="Enter Tax ID Number (Optional)"
-                         value={employee.tinNo || ''} // Use empty string for null
-                         onChange={handleChange}
-                         className="bg-white/10 text-white placeholder-gray-400 border-white/20"
-                     />
-                   </div>
-
-                  {/* FNPF Eligibility */}
-                   <div className="flex items-center space-x-2 mt-4">
-                       <Checkbox
-                           id="fnpfEligible"
-                           checked={employee.fnpfEligible}
-                           onCheckedChange={handleCheckboxChange}
-                           className="border-white data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground" // Added explicit checked styles
-                       />
-                       <Label htmlFor="fnpfEligible" className="text-white cursor-pointer">Eligible for FNPF Deduction</Label>
-                   </div>
-
-                  {/* FNPF No (Conditional) */}
-                   {employee.fnpfEligible && (
-                     <div className="grid gap-2 mt-2"> {/* Adjusted margin */}
-                         <Label htmlFor="fnpfNo" className="text-white">
-                             FNPF No <span className="text-red-500">*</span>
-                         </Label>
-                         <Input
-                             id="fnpfNo"
-                             type="text"
-                             placeholder="Enter FNPF Number"
-                             value={employee.fnpfNo || ''} // Use empty string for null
-                             onChange={handleChange}
-                             required={employee.fnpfEligible}
-                             className="bg-white/10 text-white placeholder-gray-400 border-white/20"
-                         />
-                     </div>
-                   )}
-
-                  {/* Payment Method */}
-                   <div className="grid gap-2 mt-4">
-                     <Label className="text-white font-semibold">Payment Method</Label>
-                     <RadioGroup
-                         onValueChange={(value) => handleSelectChange('paymentMethod', value)}
-                         value={employee.paymentMethod}
-                         className="grid grid-cols-2 gap-4"
-                     >
-                         <div className="flex items-center space-x-2">
-                         <RadioGroupItem value="cash" id="r-payment-cash" className="border-white text-primary" />
-                         <Label htmlFor="r-payment-cash" className="text-white cursor-pointer">Cash Wages</Label>
-                         </div>
-                         <div className="flex items-center space-x-2">
-                         <RadioGroupItem value="online" id="r-payment-online" className="border-white text-primary" />
-                         <Label htmlFor="r-payment-online" className="text-white cursor-pointer">Online Transfer</Label>
-                         </div>
-                     </RadioGroup>
-                   </div>
-
-                  {/* Bank Details (Conditional) */}
-                   {employee.paymentMethod === 'online' && (
-                   <>
-                      {/* Bank Code */}
-                       <div className="grid gap-2 mt-4">
-                       <Label htmlFor="bankCode" className="text-white">Bank Code <span className="text-red-500">*</span></Label>
-                            <Select onValueChange={handleBankCodeSelectChange} value={employee.bankCode || ''} required={employee.paymentMethod === 'online'}>
-                               <SelectTrigger className="bg-white/10 text-white placeholder-gray-400 border-white/20">
-                                   <SelectValue placeholder="Select Bank Code" />
-                               </SelectTrigger>
-                               <SelectContent>
-                                    <SelectItem value="ANZ">ANZ</SelectItem>
-                                    <SelectItem value="BSP">BSP</SelectItem>
-                                    <SelectItem value="BOB">BOB</SelectItem>
-                                    <SelectItem value="HFC">HFC</SelectItem>
-                                    <SelectItem value="BRED">BRED</SelectItem>
-                               </SelectContent>
-                           </Select>
+                     {/* Employee Selection Dropdown */}
+                      <div className="grid gap-2 mb-6"> {/* Added margin bottom */}
+                         <Label htmlFor="employee-select" className="text-white">Select Employee</Label>
+                         <Select onValueChange={handleEmployeeSelect} value={selectedEmployeeId || ''}>
+                             <SelectTrigger id="employee-select" className="bg-white/10 text-white placeholder-gray-400 border-white/20">
+                                 <SelectValue placeholder="Choose an employee to edit" />
+                             </SelectTrigger>
+                             <SelectContent>
+                                 <SelectGroup>
+                                     <SelectLabel>Employees</SelectLabel>
+                                     {allEmployees.length > 0 ? (
+                                         allEmployees.map(emp => (
+                                             <SelectItem key={emp.id} value={emp.id}>
+                                                 {emp.name} ({emp.branch})
+                                             </SelectItem>
+                                         ))
+                                     ) : (
+                                         <SelectItem value="no-employees" disabled>
+                                             No employees found
+                                         </SelectItem>
+                                     )}
+                                 </SelectGroup>
+                             </SelectContent>
+                         </Select>
                        </div>
-                       {/* Bank Account Number */}
-                       <div className="grid gap-2">
-                         <Label htmlFor="bankAccountNumber" className="text-white">
-                             Bank Account Number <span className="text-red-500">*</span>
-                         </Label>
-                         <Input
-                             id="bankAccountNumber"
-                             type="text"
-                             placeholder="Enter account number"
-                             value={employee.bankAccountNumber || ''} // Use empty string for null
-                             onChange={handleChange}
-                             required={employee.paymentMethod === 'online'}
-                             className="bg-white/10 text-white placeholder-gray-400 border-white/20"
-                         />
-                       </div>
-                   </>
-                   )}
 
-                {/* Submit Button */}
-                <Button
-                  className="w-full mt-6"
-                  type="submit"
-                  variant="gradient"
-                  disabled={isUpdating} // Disable button while updating
-                >
-                  {isUpdating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Updating...
-                    </>
-                   ) : (
-                    'Update Employee Information'
-                   )}
-                </Button>
-              </form>
-              )}
-              {/* Message when no employee is selected */}
-              {!selectedEmployeeId && !isLoadingEmployees && allEmployees.length > 0 && (
-                  <p className="text-center text-gray-400 mt-4">Please select an employee from the dropdown above to edit their information.</p>
-              )}
-              {!isLoadingEmployees && allEmployees.length === 0 && (
-                  <p className="text-center text-red-500 mt-4">No employees found. Please add employees first.</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                     {/* Loading indicator for employee details */}
+                     {isLoadingDetails && (
+                         <div className="flex items-center justify-center py-4">
+                             <Loader2 className="mr-2 h-5 w-5 animate-spin text-white" />
+                             <span className="text-white">Loading employee details...</span>
+                         </div>
+                     )}
+
+                     {/* Conditionally render form when employee is selected and loaded */}
+                     {employee && !isLoadingDetails && (
+                         <form onSubmit={handleSubmit}>
+                              {/* Branch Selection */}
+                              <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                 <Label className="text-white font-semibold">Select Branch</Label>
+                                 <RadioGroup
+                                     onValueChange={(value) => handleSelectChange('branch', value)}
+                                     value={employee.branch}
+                                     className="grid grid-cols-2 gap-4"
+                                 >
+                                     <div className="flex items-center space-x-2">
+                                         <RadioGroupItem value="labasa" id="r-branch-labasa" className="border-white text-primary" />
+                                         <Label htmlFor="r-branch-labasa" className="text-white cursor-pointer">Labasa Branch</Label>
+                                     </div>
+                                     <div className="flex items-center space-x-2">
+                                         <RadioGroupItem value="suva" id="r-branch-suva" className="border-white text-primary" />
+                                         <Label htmlFor="r-branch-suva" className="text-white cursor-pointer">Suva Branch</Label>
+                                     </div>
+                                 </RadioGroup>
+                             </div>
+
+                             {/* Employee Name */}
+                             <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                 <Label htmlFor="name" className="text-white">
+                                     Employee Name <span className="text-red-500">*</span>
+                                 </Label>
+                                 <Input
+                                     id="name"
+                                     type="text"
+                                     placeholder="Enter full name"
+                                     value={employee.name}
+                                     onChange={handleChange}
+                                     required
+                                     className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                                 />
+                             </div>
+
+                             {/* Employee Position */}
+                             <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                 <Label htmlFor="position" className="text-white">
+                                     Employee Position <span className="text-red-500">*</span>
+                                 </Label>
+                                 <Input
+                                     id="position"
+                                     type="text"
+                                     placeholder="e.g., Sales Assistant"
+                                     value={employee.position}
+                                     onChange={handleChange}
+                                     required
+                                     className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                                 />
+                             </div>
+
+                             {/* Hourly Wage */}
+                             <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                 <Label htmlFor="hourlyWage" className="text-white">
+                                     Hourly Wage ($) <span className="text-red-500">*</span>
+                                 </Label>
+                                 <Input
+                                     id="hourlyWage"
+                                     type="number"
+                                     step="0.01"
+                                     min="0"
+                                     placeholder="e.g., 15.50"
+                                     value={employee.hourlyWage || ""} // Provide default value
+                                     onChange={handleChange}
+                                     required
+                                     className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                                 />
+                             </div>
+
+                              {/* TIN No */}
+                              <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                <Label htmlFor="tinNo" className="text-white">
+                                    TIN No
+                                </Label>
+                                <Input
+                                    id="tinNo"
+                                    type="text"
+                                    placeholder="Enter Tax ID Number (Optional)"
+                                    value={employee.tinNo || ''} // Use empty string for null
+                                    onChange={handleChange}
+                                    className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                                />
+                              </div>
+
+                             {/* FNPF Eligibility */}
+                              <div className="flex items-center space-x-2 mb-2"> {/* Reduced margin bottom */}
+                                  <Checkbox
+                                      id="fnpfEligible"
+                                      checked={employee.fnpfEligible}
+                                      onCheckedChange={handleCheckboxChange}
+                                      className="border-white data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground" // Added explicit checked styles
+                                  />
+                                  <Label htmlFor="fnpfEligible" className="text-white cursor-pointer">Eligible for FNPF Deduction</Label>
+                              </div>
+
+                             {/* FNPF No (Conditional) */}
+                              {employee.fnpfEligible && (
+                                <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                    <Label htmlFor="fnpfNo" className="text-white">
+                                        FNPF No <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="fnpfNo"
+                                        type="text"
+                                        placeholder="Enter FNPF Number"
+                                        value={employee.fnpfNo || ''} // Use empty string for null
+                                        onChange={handleChange}
+                                        required={employee.fnpfEligible}
+                                        className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                                    />
+                                </div>
+                              )}
+
+                             {/* Payment Method */}
+                              <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                <Label className="text-white font-semibold">Payment Method</Label>
+                                <RadioGroup
+                                    onValueChange={(value) => handleSelectChange('paymentMethod', value)}
+                                    value={employee.paymentMethod}
+                                    className="grid grid-cols-2 gap-4"
+                                >
+                                    <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="cash" id="r-payment-cash" className="border-white text-primary" />
+                                    <Label htmlFor="r-payment-cash" className="text-white cursor-pointer">Cash Wages</Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="online" id="r-payment-online" className="border-white text-primary" />
+                                    <Label htmlFor="r-payment-online" className="text-white cursor-pointer">Online Transfer</Label>
+                                    </div>
+                                </RadioGroup>
+                              </div>
+
+                             {/* Bank Details (Conditional) */}
+                              {employee.paymentMethod === 'online' && (
+                              <>
+                                 {/* Bank Code */}
+                                  <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                  <Label htmlFor="bankCode" className="text-white">Bank Code <span className="text-red-500">*</span></Label>
+                                       <Select onValueChange={handleBankCodeSelectChange} value={employee.bankCode || ''} required={employee.paymentMethod === 'online'}>
+                                          <SelectTrigger className="bg-white/10 text-white placeholder-gray-400 border-white/20">
+                                              <SelectValue placeholder="Select Bank Code" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                               <SelectItem value="ANZ">ANZ</SelectItem>
+                                               <SelectItem value="BSP">BSP</SelectItem>
+                                               <SelectItem value="BOB">BOB</SelectItem>
+                                               <SelectItem value="HFC">HFC</SelectItem>
+                                               <SelectItem value="BRED">BRED</SelectItem>
+                                          </SelectContent>
+                                      </Select>
+                                  </div>
+                                  {/* Bank Account Number */}
+                                  <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                    <Label htmlFor="bankAccountNumber" className="text-white">
+                                        Bank Account Number <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="bankAccountNumber"
+                                        type="text"
+                                        placeholder="Enter account number"
+                                        value={employee.bankAccountNumber || ''} // Use empty string for null
+                                        onChange={handleChange}
+                                        required={employee.paymentMethod === 'online'}
+                                        className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                                    />
+                                  </div>
+                              </>
+                              )}
+
+                           {/* Submit Button */}
+                           <Button
+                             className="w-full mt-6"
+                             type="submit"
+                             variant="gradient"
+                             disabled={isUpdating} // Disable button while updating
+                           >
+                             {isUpdating ? (
+                               <>
+                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                 Updating...
+                               </>
+                              ) : (
+                               'Update Employee Information'
+                              )}
+                           </Button>
+                         </form>
+                     )}
+                     {/* Message when no employee is selected */}
+                     {!selectedEmployeeId && !isLoadingEmployees && allEmployees.length > 0 && (
+                         <p className="text-center text-gray-400 mt-4">Please select an employee from the dropdown above to edit their information.</p>
+                     )}
+                     {!isLoadingEmployees && allEmployees.length === 0 && (
+                         <p className="text-center text-red-500 mt-4">No employees found. Please add employees first.</p>
+                     )}
+                 </CardContent>
+             </Card>
+         </main>
           {/* Footer is handled by RootLayout */}
 
           {/* Password Confirmation Dialog */}
