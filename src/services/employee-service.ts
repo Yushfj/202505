@@ -1,4 +1,3 @@
-
 'use server';
 
 import { query, getDbPool } from '@/lib/db'; // Import getDbPool along with query
@@ -141,6 +140,8 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
        errorMessage = 'Failed to add employee. Database connection is not available. Check server logs for initialization errors.';
     } else if (error.message?.includes('Database connection is not available')) {
         errorMessage = error.message; // Use the specific message from the query function
+    } else if (error.message?.includes('relation "employees" does not exist')) {
+        errorMessage = 'Failed to add employee. The "employees" table was not found. Please check if the table name is correct (e.g., employees1).';
     }
     throw new Error(errorMessage);
   }
@@ -304,12 +305,15 @@ export const getEmployeeById = async (employeeId: string): Promise<Employee | nu
 
 // --- Wage Record Service Functions ---
 
+// Updated WageRecord interface
 interface WageRecord {
   id?: string; // Optional: UUID from DB if fetching existing
   employeeId: string;
   employeeName: string;
   hourlyWage: number;
-  hoursWorked: number;
+  totalHours: number; // Total hours worked
+  hoursWorked: number; // Normal hours (<= 40)
+  overtimeHours: number; // Overtime hours (> 40)
   mealAllowance: number;
   fnpfDeduction: number;
   otherDeductions: number;
@@ -319,6 +323,7 @@ interface WageRecord {
   dateTo: string;
   created_at?: Date;
 }
+
 
 /**
  * Saves multiple wage records to the database for a specific period.
@@ -357,21 +362,23 @@ export const saveWageRecords = async (wageRecords: WageRecord[]): Promise<void> 
 
       // Prepare for bulk insert
       const insertValues = wageRecords.map(record => [
-          record.employeeId, record.employeeName, record.hourlyWage, record.hoursWorked, record.mealAllowance,
-          record.fnpfDeduction, record.otherDeductions, record.grossPay, record.netPay, record.dateFrom, record.dateTo
+          record.employeeId, record.employeeName, record.hourlyWage,
+          record.totalHours, record.hoursWorked, record.overtimeHours, // Use the new fields
+          record.mealAllowance, record.fnpfDeduction, record.otherDeductions, record.grossPay, record.netPay, record.dateFrom, record.dateTo
       ]);
 
       let placeholderIndex = 1;
       const placeholders = insertValues.map(() =>
-          `($${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}::date, $${placeholderIndex++}::date)`
+          `($${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}, $${placeholderIndex++}::date, $${placeholderIndex++}::date)`
       ).join(', ');
 
       const flatValues = insertValues.flat();
 
       await client.query(
           `INSERT INTO wage_records (
-               employee_id, employee_name, hourly_wage, hours_worked, meal_allowance,
-               fnpf_deduction, other_deductions, gross_pay, net_pay, date_from, date_to
+               employee_id, employee_name, hourly_wage,
+               total_hours, hours_worked, overtime_hours, -- Added/updated columns
+               meal_allowance, fnpf_deduction, other_deductions, gross_pay, net_pay, date_from, date_to
            ) VALUES ${placeholders};`,
           flatValues
       );
@@ -407,7 +414,9 @@ export const getWageRecords = async (filterDateFrom: Date | null = null, filterD
       employee_id AS "employeeId",
       employee_name AS "employeeName",
       hourly_wage AS "hourlyWage",
-      hours_worked AS "hoursWorked",
+      total_hours AS "totalHours", -- Fetch total hours
+      hours_worked AS "hoursWorked", -- Fetch normal hours
+      overtime_hours AS "overtimeHours", -- Fetch overtime hours
       meal_allowance AS "mealAllowance",
       fnpf_deduction AS "fnpfDeduction",
       other_deductions AS "otherDeductions",
@@ -441,7 +450,9 @@ export const getWageRecords = async (filterDateFrom: Date | null = null, filterD
     return result.rows.map(row => ({
         ...row,
         hourlyWage: Number(row.hourlyWage) || 0,
+        totalHours: Number(row.totalHours) || 0, // Added totalHours
         hoursWorked: Number(row.hoursWorked) || 0,
+        overtimeHours: Number(row.overtimeHours) || 0,
         mealAllowance: Number(row.mealAllowance) || 0,
         fnpfDeduction: Number(row.fnpfDeduction) || 0,
         otherDeductions: Number(row.otherDeductions) || 0,
@@ -476,4 +487,28 @@ export const deleteWageRecordsByPeriod = async (dateFrom: string, dateTo: string
      // Re-throw the original error from the query function
      throw error;
    }
+};
+
+/**
+ * Checks if wage records exist for a given date range.
+ * @param {Date} dateFrom - Start date of the period.
+ * @param {Date} dateTo - End date of the period.
+ * @returns {Promise<boolean>} True if records exist, false otherwise.
+ */
+export const checkWageRecordsExist = async (dateFrom: Date, dateTo: Date): Promise<boolean> => {
+    if (!dateFrom || !dateTo || !isValid(dateFrom) || !isValid(dateTo)) {
+        console.error("Invalid date range provided to checkWageRecordsExist");
+        return false; // Or throw an error
+    }
+    try {
+        const result = await query(
+            `SELECT 1 FROM wage_records WHERE date_from = $1::date AND date_to = $2::date LIMIT 1;`,
+            [format(dateFrom, 'yyyy-MM-dd'), format(dateTo, 'yyyy-MM-dd')]
+        );
+        return result.rowCount > 0;
+    } catch (error: any) {
+        console.error(`Error checking for existing wage records for period ${format(dateFrom, 'yyyy-MM-dd')} to ${format(dateTo, 'yyyy-MM-dd')}:`, error);
+        // Depending on requirements, you might want to re-throw or return false/true based on the error type
+        throw new Error("Failed to check for existing wage records.");
+    }
 };

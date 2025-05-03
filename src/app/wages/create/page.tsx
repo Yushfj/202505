@@ -1,4 +1,3 @@
-
 'use client';
 
 import {useState, useEffect, useMemo, useCallback} from 'react';
@@ -20,13 +19,30 @@ import {cn} from '@/lib/utils';
 import {format, isValid, parseISO} from 'date-fns'; // Import isValid and parseISO for date validation
 import {CalendarIcon, ArrowLeft, Home, FileDown, FileText, Save, Loader2} from 'lucide-react'; // Added Loader2
 import {DateRange} from 'react-day-picker';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
-import * as XLSX from 'xlsx';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 // Import DB service functions
-// Removed checkWageRecordsExist as it's handled by saveWageRecords now
-import { getEmployees, saveWageRecords } from '@/services/employee-service';
+import { getEmployees, saveWageRecords, getWageRecords, checkWageRecordsExist } from '@/services/employee-service';
+import * as XLSX from 'xlsx';
+
+
+// --- Constants ---
+const OVERTIME_RATE = 1.5;
+const STANDARD_NORMAL_HOURS_THRESHOLD = 45; // Changed from 40 to 45
+const SPECIAL_EMPLOYEE_NAME = "Bimlesh Shashi Prakash";
+const SPECIAL_NORMAL_HOURS_THRESHOLD = 48;
+
 
 // --- Interfaces ---
 // Matches the structure in employee-service.ts
@@ -46,7 +62,9 @@ interface Employee {
 
 // Combined interface for wage input details stored in state
 interface WageInputDetails {
-    hoursWorked: string;
+    totalHours: string; // User enters total hours here
+    hoursWorked: string; // Normal hours (calculated)
+    overtimeHours: string; // Overtime hours (calculated)
     mealAllowance: string;
     otherDeductions: string;
 }
@@ -56,8 +74,10 @@ interface WageRecord {
   employeeId: string;
   employeeName: string;
   hourlyWage: number;
-  hoursWorked: number;
-  mealAllowance: number; // Added meal allowance
+  totalHours: number; // Store total hours
+  hoursWorked: number; // Store normal hours
+  overtimeHours: number; // Store overtime hours
+  mealAllowance: number;
   fnpfDeduction: number;
   otherDeductions: number;
   grossPay: number;
@@ -73,7 +93,9 @@ interface CalculatedWageInfo {
     bankCode: string | null;
     bankAccountNumber: string | null;
     hourlyWage: number;
-    hoursWorked: number;
+    totalHours: number; // Added total hours
+    hoursWorked: number; // Normal hours
+    overtimeHours: number; // Overtime hours
     mealAllowance: number;
     otherDeductions: number;
     grossPay: number;
@@ -95,6 +117,22 @@ const CreateWagesPage = () => {
   const [isLoading, setIsLoading] = useState(true); // Loading state for employees
   const [isSaving, setIsSaving] = useState(false); // Saving state for buttons
   const {toast} = useToast();
+  const [deletePassword, setDeletePassword] = useState('');
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const ADMIN_PASSWORD = 'admin01'; // Store securely in a real application
+
+  // State for totals
+  const [totalTotalHours, setTotalTotalHours] = useState<number>(0); // Total hours entered
+  const [totalHoursWorked, setTotalHoursWorked] = useState<number>(0); // Total normal hours
+  const [totalOvertimeHours, setTotalOvertimeHours] = useState<number>(0); // Total overtime hours
+  const [totalMealAllowance, setTotalMealAllowance] = useState<number>(0);
+  const [totalOtherDeductions, setTotalOtherDeductions] = useState<number>(0);
+  const [totalFnpfDeduction, setTotalFnpfDeduction] = useState<number>(0);
+  const [totalNetPay, setTotalNetPay] = useState<number>(0);
+  const [totalSuvaWages, setTotalSuvaWages] = useState<number>(0);
+  const [totalLabasaWages, setTotalLabasaWages] = useState<number>(0);
+  const [totalCashWages, setTotalCashWages] = useState<number>(0);
+
 
   // --- Data Fetching ---
   const fetchEmployeesCallback = useCallback(async () => {
@@ -106,7 +144,7 @@ const CreateWagesPage = () => {
         // Initialize wageInputMap based on fetched employees
         const initialWageInputs: { [employeeId: string]: WageInputDetails } = {};
         fetchedEmployees.forEach((emp: Employee) => {
-          initialWageInputs[emp.id] = { hoursWorked: '', mealAllowance: '', otherDeductions: '' };
+          initialWageInputs[emp.id] = { totalHours: '', hoursWorked: '0', overtimeHours: '0', mealAllowance: '', otherDeductions: '' };
         });
         setWageInputMap(initialWageInputs);
       } else {
@@ -133,7 +171,8 @@ const CreateWagesPage = () => {
   }, [fetchEmployeesCallback]); // Runs once on mount due to useCallback
 
   // --- Input Handlers ---
-  const handleWageInputChange = (employeeId: string, field: keyof WageInputDetails, value: string) => {
+  // Handles changes to Meal Allowance and Other Deductions
+  const handleWageInputChange = (employeeId: string, field: keyof Omit<WageInputDetails, 'totalHours' | 'hoursWorked' | 'overtimeHours'>, value: string) => {
     // Basic input validation: allow only numbers and optionally a decimal point
     const sanitizedValue = value.replace(/[^0-9.]/g, '');
     // Prevent multiple decimal points
@@ -146,40 +185,89 @@ const CreateWagesPage = () => {
     }));
   };
 
+   // Handles changes to the Total Hours input
+   const handleTotalHoursChange = (employeeId: string, totalHoursStr: string) => {
+       // Basic validation for total hours input
+       const sanitizedValue = totalHoursStr.replace(/[^0-9.]/g, '');
+       if ((sanitizedValue.match(/\./g) || []).length > 1) {
+           return;
+       }
+
+       const totalHoursNum = parseFloat(sanitizedValue || '0') || 0;
+
+       // Find the employee to check for the special case
+       const employee = employees.find(emp => emp.id === employeeId);
+       const normalHoursThreshold = employee?.name === SPECIAL_EMPLOYEE_NAME
+           ? SPECIAL_NORMAL_HOURS_THRESHOLD
+           : STANDARD_NORMAL_HOURS_THRESHOLD;
+
+       // Calculate normal and overtime hours based on the threshold
+       const normalHours = Math.min(totalHoursNum, normalHoursThreshold);
+       const overtimeHours = Math.max(0, totalHoursNum - normalHoursThreshold);
+
+       // Update the state for this employee
+       setWageInputMap(prev => ({
+           ...prev,
+           [employeeId]: {
+               ...prev[employeeId],
+               totalHours: sanitizedValue, // Store the raw sanitized input string
+               hoursWorked: normalHours.toFixed(2), // Store calculated normal hours as string
+               overtimeHours: overtimeHours.toFixed(2), // Store calculated overtime hours as string
+           },
+       }));
+   };
+
   // --- Calculations (Memoized) ---
   const calculatedWageData = useMemo(() => {
     const calculatedMap: { [employeeId: string]: CalculatedWageInfo } = {};
-    let totalNet = 0;
-    let totalFnpf = 0;
-    let totalSuva = 0;
-    let totalLabasa = 0;
-    let totalCash = 0;
+    let runningTotalTotalHrs = 0;
+    let runningTotalHours = 0;
+    let runningTotalOvertime = 0;
+    let runningTotalMeal = 0;
+    let runningTotalOtherDed = 0;
+    let runningTotalFnpf = 0;
+    let runningTotalNet = 0;
+    let runningTotalSuva = 0;
+    let runningTotalLabasa = 0;
+    let runningTotalCash = 0;
+
 
     employees.forEach(employee => {
-      const inputs = wageInputMap[employee.id] || { hoursWorked: '0', mealAllowance: '0', otherDeductions: '0' };
-      const hourlyWage = parseFloat(employee.hourlyWage || '0') || 0; // Ensure number, default 0
-      const hoursWorked = parseFloat(inputs.hoursWorked || '0') || 0;
+      const inputs = wageInputMap[employee.id] || { totalHours: '0', hoursWorked: '0', overtimeHours: '0', mealAllowance: '0', otherDeductions: '0' };
+      const hourlyWage = parseFloat(employee.hourlyWage || '0') || 0;
+      // Use the calculated hours from the state (derived from totalHours)
+      const totalHours = parseFloat(inputs.totalHours || '0') || 0;
+      const hoursWorked = parseFloat(inputs.hoursWorked || '0') || 0; // These are calculated in handleTotalHoursChange
+      const overtimeHours = parseFloat(inputs.overtimeHours || '0') || 0; // These are calculated in handleTotalHoursChange
       const mealAllowance = parseFloat(inputs.mealAllowance || '0') || 0;
       const otherDeductions = parseFloat(inputs.otherDeductions || '0') || 0;
 
       // Validate inputs are non-negative numbers
-      if (isNaN(hourlyWage) || hourlyWage < 0 || isNaN(hoursWorked) || hoursWorked < 0 || isNaN(mealAllowance) || mealAllowance < 0 || isNaN(otherDeductions) || otherDeductions < 0) {
+      if (isNaN(hourlyWage) || hourlyWage < 0 || isNaN(totalHours) || totalHours < 0 || isNaN(mealAllowance) || mealAllowance < 0 || isNaN(otherDeductions) || otherDeductions < 0) {
           console.warn(`Skipping wage calculation for ${employee.name} due to invalid input.`);
           // Provide default values for display
           calculatedMap[employee.id] = {
             employeeId: employee.id, employeeName: employee.name, bankCode: employee.bankCode,
-            bankAccountNumber: employee.bankAccountNumber, hourlyWage: 0, hoursWorked: 0,
+            bankAccountNumber: employee.bankAccountNumber, hourlyWage: 0, totalHours: 0, hoursWorked: 0, overtimeHours: 0,
             mealAllowance: 0, otherDeductions: 0, grossPay: 0, fnpfDeduction: 0, netPay: 0,
             fnpfEligible: employee.fnpfEligible, paymentMethod: employee.paymentMethod, branch: employee.branch
           };
          return; // Go to the next employee
       }
 
-      const grossPay = (hourlyWage * hoursWorked) + mealAllowance;
+      // Calculate pay components
+      const regularPay = hourlyWage * hoursWorked;
+      const overtimePay = overtimeHours * hourlyWage * OVERTIME_RATE;
+      // Gross Pay includes regular pay, overtime pay, and meal allowance
+      const grossPay = regularPay + overtimePay + mealAllowance;
+
+      // FNPF calculation based *only* on regular pay (normal hours * hourly wage)
       let fnpfDeduction = 0;
-      if (employee.fnpfEligible && grossPay > 0) {
-        fnpfDeduction = grossPay * 0.08; // Calculate FNPF only if eligible and grossPay is positive
+      if (employee.fnpfEligible && regularPay > 0) {
+        fnpfDeduction = regularPay * 0.08; // FNPF is 8% of regular pay
       }
+
+      // Net Pay calculation: Gross Pay minus FNPF and Other Deductions
       const netPay = Math.max(0, grossPay - fnpfDeduction - otherDeductions); // Ensure net pay is not negative
 
       calculatedMap[employee.id] = {
@@ -188,7 +276,9 @@ const CreateWagesPage = () => {
         bankCode: employee.bankCode,
         bankAccountNumber: employee.bankAccountNumber,
         hourlyWage,
-        hoursWorked,
+        totalHours, // Included total hours
+        hoursWorked, // Normal hours
+        overtimeHours, // Overtime hours
         mealAllowance,
         otherDeductions,
         grossPay,
@@ -200,15 +290,37 @@ const CreateWagesPage = () => {
       };
 
       // Accumulate totals
-      totalNet += netPay;
-      totalFnpf += fnpfDeduction;
-      if (employee.branch === 'suva') totalSuva += netPay;
-      if (employee.branch === 'labasa') totalLabasa += netPay;
-      if (employee.paymentMethod === 'cash') totalCash += netPay;
+      runningTotalTotalHrs += totalHours;
+      runningTotalHours += hoursWorked;
+      runningTotalOvertime += overtimeHours;
+      runningTotalMeal += mealAllowance;
+      runningTotalOtherDed += otherDeductions;
+      runningTotalFnpf += fnpfDeduction;
+      runningTotalNet += netPay;
+
+      if (employee.branch === 'suva') runningTotalSuva += netPay;
+      if (employee.branch === 'labasa') runningTotalLabasa += netPay;
+      if (employee.paymentMethod === 'cash') runningTotalCash += netPay;
     });
 
-    return { calculatedMap, totals: { totalNet, totalFnpf, totalSuva, totalLabasa, totalCash } };
-  }, [employees, wageInputMap]);
+    // Set totals state outside the loop
+    setTotalTotalHours(runningTotalTotalHrs);
+    setTotalHoursWorked(runningTotalHours);
+    setTotalOvertimeHours(runningTotalOvertime);
+    setTotalMealAllowance(runningTotalMeal);
+    setTotalOtherDeductions(runningTotalOtherDed);
+    setTotalFnpfDeduction(runningTotalFnpf);
+    setTotalNetPay(runningTotalNet);
+    setTotalSuvaWages(runningTotalSuva);
+    setTotalLabasaWages(runningTotalLabasa);
+    setTotalCashWages(runningTotalCash);
+
+
+    // No need to return totals here as they are managed by state now
+    return { calculatedMap }; // Return only the map
+
+  }, [employees, wageInputMap]); // Recalculate when employees or inputs change
+
 
   // --- Helper Functions ---
   const getCurrentWageRecordsForDb = (): WageRecord[] => {
@@ -220,15 +332,17 @@ const CreateWagesPage = () => {
     employees.forEach(employee => {
       const calculatedDetails = calculatedWageData.calculatedMap[employee.id];
       // Ensure calculation was successful and inputs are valid before adding
-       if (calculatedDetails && calculatedDetails.hoursWorked >= 0 && calculatedDetails.mealAllowance >= 0 && calculatedDetails.otherDeductions >= 0) {
-         // Only include records where hoursWorked > 0 or other fields have values? (Optional)
-         // if (calculatedDetails.hoursWorked > 0 || calculatedDetails.mealAllowance > 0 || calculatedDetails.otherDeductions > 0) {
+       if (calculatedDetails && calculatedDetails.totalHours >= 0 && calculatedDetails.mealAllowance >= 0 && calculatedDetails.otherDeductions >= 0) {
+         // Only include records where totalHours > 0 or other fields have values? (Optional)
+         // if (calculatedDetails.totalHours > 0 || calculatedDetails.mealAllowance > 0 || calculatedDetails.otherDeductions > 0) {
             records.push({
               employeeId: calculatedDetails.employeeId,
               employeeName: calculatedDetails.employeeName,
               hourlyWage: calculatedDetails.hourlyWage,
-              hoursWorked: calculatedDetails.hoursWorked,
-              mealAllowance: calculatedDetails.mealAllowance, // Include meal allowance
+              totalHours: calculatedDetails.totalHours, // Include total hours
+              hoursWorked: calculatedDetails.hoursWorked, // Normal hours
+              overtimeHours: calculatedDetails.overtimeHours, // Overtime hours
+              mealAllowance: calculatedDetails.mealAllowance,
               otherDeductions: calculatedDetails.otherDeductions,
               grossPay: calculatedDetails.grossPay,
               fnpfDeduction: calculatedDetails.fnpfEligible ? calculatedDetails.fnpfDeduction : 0, // Only include FNPF if eligible
@@ -247,38 +361,77 @@ const CreateWagesPage = () => {
        setDateRange(undefined);
        const initialWageInputs: { [employeeId: string]: WageInputDetails } = {};
        employees.forEach(emp => {
-           initialWageInputs[emp.id] = { hoursWorked: '', mealAllowance: '', otherDeductions: '' };
+           initialWageInputs[emp.id] = { totalHours: '', hoursWorked: '0', overtimeHours: '0', mealAllowance: '', otherDeductions: '' };
        });
        setWageInputMap(initialWageInputs);
    }, [employees]);
 
   // --- Event Handlers (Save, Export) ---
   const handleSaveWages = async () => {
-    if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-      toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' });
-      return;
-    }
+       if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
+         toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' });
+         return;
+       }
 
-    const recordsToSave = getCurrentWageRecordsForDb();
-    if (recordsToSave.length === 0) {
-      toast({ title: 'Info', description: 'No valid wage data calculated to save.', variant: 'default' });
-      return;
-    }
+       const recordsToSave = getCurrentWageRecordsForDb();
+       if (recordsToSave.length === 0) {
+         toast({ title: 'Info', description: 'No valid wage data calculated to save.', variant: 'default' });
+         return;
+       }
 
-    setIsSaving(true);
-    try {
-      // Call the service function to save/overwrite records in DB
-      // This will handle deleting existing records for the period first.
-      await saveWageRecords(recordsToSave);
-      toast({ title: 'Success', description: 'Wages calculated and recorded successfully!' });
-      resetForm(); // Clear form after successful save
-    } catch (error: any) {
-      console.error('Error saving wage records:', error);
-      toast({ title: 'Save Error', description: error.message || 'Failed to save wage records.', variant: 'destructive' });
-    } finally {
-      setIsSaving(false);
-    }
-  };
+       setIsSaving(true);
+       try {
+           // Check if records exist for this period
+           const recordsExist = await checkWageRecordsExist(dateRange.from, dateRange.to);
+
+           if (recordsExist) {
+               // If records exist, prompt for admin password
+               setShowPasswordDialog(true);
+           } else {
+               // If no records exist, save directly
+               await saveWageRecords(recordsToSave);
+               toast({ title: 'Success', description: 'Wages calculated and recorded successfully!' });
+               resetForm(); // Clear form after successful save
+           }
+       } catch (error: any) {
+           console.error('Error during save process:', error);
+           toast({ title: 'Save Error', description: error.message || 'Failed to check or save wage records.', variant: 'destructive' });
+       } finally {
+           setIsSaving(false);
+       }
+     };
+
+   // Function called when password confirmation is submitted for saving/overwriting
+   const confirmSaveWithPassword = async () => {
+       if (deletePassword !== ADMIN_PASSWORD) {
+           toast({ title: 'Error', description: 'Incorrect admin password.', variant: 'destructive' });
+           return; // Stop the process
+       }
+
+       // Close dialog first
+       setShowPasswordDialog(false);
+       setDeletePassword(''); // Clear password
+
+       const recordsToSave = getCurrentWageRecordsForDb();
+       if (recordsToSave.length === 0) {
+           toast({ title: 'Info', description: 'No valid wage data to save.', variant: 'default' });
+           return;
+       }
+
+       setIsSaving(true);
+       try {
+           // Call the service function to save/overwrite records in DB
+           await saveWageRecords(recordsToSave); // This will handle deleting existing records first.
+           toast({ title: 'Success', description: 'Wages updated successfully!' });
+           resetForm(); // Clear form after successful update
+       } catch (error: any) {
+           console.error('Error updating wage records:', error);
+           toast({ title: 'Update Error', description: error.message || 'Failed to update wage records.', variant: 'destructive' });
+       } finally {
+           setIsSaving(false);
+       }
+   };
+
 
     // Function to handle exporting data (CSV or Excel)
     const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
@@ -353,8 +506,8 @@ const CreateWagesPage = () => {
         } else if (formatType === 'Excel') {
             const excelData = [
                 [ // Headers
-                    'Employee Name', 'Bank Code', 'Account #', 'Hourly Wage', 'Hours Worked', 'Meal Allowance',
-                    'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
+                    'Employee Name', 'Bank Code', 'Account #', 'Hourly Wage', 'Total Hours', 'Normal Hours', 'Overtime Hours', // Added Total Hours header
+                    'Meal Allowance', 'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
                     'Date From', 'Date To', 'FNPF Eligible', 'Branch', 'Payment Method'
                 ],
                 // Use ALL calculated records for Excel export
@@ -363,7 +516,9 @@ const CreateWagesPage = () => {
                     record.bankCode || 'N/A',
                     record.bankAccountNumber || 'N/A',
                     record.hourlyWage.toFixed(2),
+                    record.totalHours.toFixed(2), // Added total hours value
                     record.hoursWorked.toFixed(2),
+                    record.overtimeHours.toFixed(2),
                     record.mealAllowance.toFixed(2), // Include meal allowance
                     record.fnpfEligible ? record.fnpfDeduction.toFixed(2) : 'N/A', // Only show FNPF if eligible
                     record.otherDeductions.toFixed(2),
@@ -375,23 +530,27 @@ const CreateWagesPage = () => {
                     record.branch, // Add branch
                     record.paymentMethod, // Add payment method
                 ]),
-                [ // Totals row
-                    'Totals', '', '', '', '', '', // Spacers for name, bank details, wage, hours, meal
-                    calculatedWageData.totals.totalFnpf.toFixed(2), // FNPF Total
-                    recordsToExport.reduce((sum, r) => sum + r.otherDeductions, 0).toFixed(2), // Other Deductions Total
-                    recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2), // Gross Pay Total
-                    calculatedWageData.totals.totalNet.toFixed(2), // Net Pay Total
-                    '', '', '', '', '' // Spacers for dates, eligibility, branch, payment
-                ],
+                 [ // Totals row
+                     'Totals', '', '', '', // Spacers for name, bank details, wage
+                     totalTotalHours.toFixed(2), // Total Total Hours
+                     totalHoursWorked.toFixed(2), // Total Normal Hours
+                     totalOvertimeHours.toFixed(2), // Total Overtime Hours
+                     totalMealAllowance.toFixed(2), // Total Meal Allowance
+                     totalFnpfDeduction.toFixed(2), // Total FNPF
+                     totalOtherDeductions.toFixed(2), // Total Other Deductions
+                     recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2), // Gross Pay Total
+                     totalNetPay.toFixed(2), // Net Pay Total
+                     '', '', '', '', '' // Spacers for dates, eligibility, branch, payment
+                 ],
             ];
 
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet(excelData);
             // Optional: Adjust column widths
             ws['!cols'] = [
-              {wch: 20}, {wch: 10}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 15}, // Name, Bank, Acct, Wage, Hrs, Meal
-              {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}, // FNPF, Other, Gross, Net, DateFrom, DateTo
-              {wch: 12}, {wch: 10}, {wch: 12} // Eligible, Branch, Payment
+              {wch: 20}, {wch: 10}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 14}, // Name, Bank, Acct, Wage, TotalHrs, NormalHrs, OTHrs
+              {wch: 15}, {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, // Meal, FNPF, Other, Gross, Net
+              {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10}, {wch: 12} // DateFrom, DateTo, Eligible, Branch, Payment
             ];
             XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
             XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
@@ -437,7 +596,7 @@ const CreateWagesPage = () => {
 
         {/* Main Content */}
         <main className="flex flex-col items-center flex-grow w-full pb-16">
-          <Card className="w-full max-w-6xl bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 p-4">
+          <Card className="w-full max-w-7xl bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 p-4"> {/* Increased max-width */}
              {/* Date Picker */}
             <CardHeader className="pb-2">
                 <div className="flex justify-center mb-4">
@@ -490,12 +649,14 @@ const CreateWagesPage = () => {
                     <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
                     <Table>
                         <TableHeader className="bg-white/10">
-                        <TableRow className="hover:bg-transparent">
+                        <TableRow>
                             <TableHead className="text-white border-r border-white/20">Employee</TableHead>
                             <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
                             <TableHead className="text-white border-r border-white/20">Account #</TableHead>
                             <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Hours</TableHead>
+                            <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* New Total Hours */}
+                            <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead>
+                            <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
                             <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
                             <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
                             <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
@@ -512,23 +673,31 @@ const CreateWagesPage = () => {
                                 const displayNetPay = calcDetails ? `$${(calcDetails.netPay || 0).toFixed(2)}` : '$0.00';
                                 const displayBankCode = employee.paymentMethod === 'online' ? (employee.bankCode || 'N/A') : 'Cash';
                                 const displayAccountNum = employee.paymentMethod === 'online' ? (employee.bankAccountNumber || 'N/A') : 'N/A';
+                                const displayNormalHours = wageInputMap[employee.id]?.hoursWorked || '0.00';
+                                const displayOvertimeHours = wageInputMap[employee.id]?.overtimeHours || '0.00';
 
                                 return (
-                                    <TableRow key={employee.id} className="hover:bg-white/5 border-t border-white/10">
+                                    <TableRow key={employee.id} className="border-b transition-colors data-[state=selected]:bg-muted hover:bg-white/10">
                                         <TableCell className="text-white border-r border-white/20">{employee.name}</TableCell>
                                         <TableCell className="text-white border-r border-white/20">{displayBankCode}</TableCell>
                                         <TableCell className="text-white border-r border-white/20">{displayAccountNum}</TableCell>
                                         <TableCell className="text-white border-r border-white/20 text-right">${displayWage}</TableCell>
-                                        <TableCell className="border-r border-white/20">
+                                        <TableCell className="border-r border-white/20"> {/* Total Hours Input */}
                                             <Input
-                                                type="text" // Use text to allow easier input with validation
-                                                pattern="[0-9]*\.?[0-9]*" // Basic pattern for numbers/decimals
-                                                placeholder="Hrs"
-                                                value={wageInputMap[employee.id]?.hoursWorked || ''}
-                                                onChange={e => handleWageInputChange(employee.id, 'hoursWorked', e.target.value)}
-                                                className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right"
-                                                inputMode="decimal" // Hint for mobile keyboards
+                                                type="text"
+                                                pattern="[0-9]*\.?[0-9]*"
+                                                placeholder="Total"
+                                                value={wageInputMap[employee.id]?.totalHours || ''}
+                                                onChange={e => handleTotalHoursChange(employee.id, e.target.value)}
+                                                className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right"
+                                                inputMode="decimal"
                                             />
+                                        </TableCell>
+                                        <TableCell className="text-white border-r border-white/20 text-right"> {/* Normal Hours Display */}
+                                            {displayNormalHours}
+                                        </TableCell>
+                                        <TableCell className="text-white border-r border-white/20 text-right"> {/* Overtime Hours Display */}
+                                            {displayOvertimeHours}
                                         </TableCell>
                                         <TableCell className="border-r border-white/20">
                                             <Input
@@ -537,7 +706,7 @@ const CreateWagesPage = () => {
                                                  placeholder="Amt"
                                                  value={wageInputMap[employee.id]?.mealAllowance || ''}
                                                  onChange={e => handleWageInputChange(employee.id, 'mealAllowance', e.target.value)}
-                                                 className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right"
+                                                 className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" // Adjusted width
                                                  inputMode="decimal"
                                             />
                                         </TableCell>
@@ -548,7 +717,7 @@ const CreateWagesPage = () => {
                                                  placeholder="Amt"
                                                  value={wageInputMap[employee.id]?.otherDeductions || ''}
                                                  onChange={e => handleWageInputChange(employee.id, 'otherDeductions', e.target.value)}
-                                                 className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right"
+                                                 className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" // Adjusted width
                                                  inputMode="decimal"
                                             />
                                         </TableCell>
@@ -562,17 +731,32 @@ const CreateWagesPage = () => {
                                 );
                             })}
                             {/* Total Row */}
-                            <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
-                            <TableCell colSpan={7} className="text-right text-white pr-4">
-                                Totals:
-                            </TableCell>
-                            <TableCell className="text-white border-l border-r border-white/20 text-right">
-                                ${calculatedWageData.totals.totalFnpf.toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-white text-right">
-                                ${calculatedWageData.totals.totalNet.toFixed(2)}
-                            </TableCell>
-                            </TableRow>
+                           <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
+                             <TableCell colSpan={4} className="text-right text-white pr-4">
+                               Totals:
+                             </TableCell>
+                             <TableCell className="text-white border-l border-r border-white/20 text-right"> {/* Total Total Hours */}
+                                {totalTotalHours.toFixed(2)}
+                             </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right"> {/* Total Normal Hours */}
+                               {totalHoursWorked.toFixed(2)}
+                             </TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right"> {/* Total Overtime Hours */}
+                               {totalOvertimeHours.toFixed(2)}
+                              </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right">
+                               ${totalMealAllowance.toFixed(2)}
+                             </TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">
+                               ${totalOtherDeductions.toFixed(2)}
+                             </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right">
+                               ${totalFnpfDeduction.toFixed(2)}
+                             </TableCell>
+                             <TableCell className="text-white text-right">
+                               ${totalNetPay.toFixed(2)}
+                             </TableCell>
+                           </TableRow>
                         </TableBody>
                     </Table>
                     </div>
@@ -597,13 +781,13 @@ const CreateWagesPage = () => {
                 {/* Branch/Cash Total Display */}
                 <div className="mt-6 pt-4 border-t border-white/20 text-center space-y-1">
                   <div className="text-md text-gray-300">
-                    Total Suva Branch Wages: <span className="font-semibold text-white">${calculatedWageData.totals.totalSuva.toFixed(2)}</span>
+                    Total Suva Branch Wages: <span className="font-semibold text-white">${totalSuvaWages.toFixed(2)}</span>
                   </div>
                   <div className="text-md text-gray-300">
-                    Total Labasa Branch Wages: <span className="font-semibold text-white">${calculatedWageData.totals.totalLabasa.toFixed(2)}</span>
+                    Total Labasa Branch Wages: <span className="font-semibold text-white">${totalLabasaWages.toFixed(2)}</span>
                   </div>
                   <div className="text-md text-gray-300">
-                    Total Cash Wages: <span className="font-semibold text-white">${calculatedWageData.totals.totalCash.toFixed(2)}</span>
+                    Total Cash Wages: <span className="font-semibold text-white">${totalCashWages.toFixed(2)}</span>
                   </div>
                 </div>
             </CardContent>
@@ -612,9 +796,41 @@ const CreateWagesPage = () => {
 
       </div>
         {/* Footer is handled by RootLayout */}
+
+       {/* AlertDialog for admin password */}
+        <AlertDialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+           <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
+               <AlertDialogHeader>
+                   <AlertDialogTitle>Confirm Update</AlertDialogTitle>
+                   <AlertDialogDescription className="text-gray-300">
+                       Wage records already exist for this period. Enter the admin password to overwrite them.
+                   </AlertDialogDescription>
+               </AlertDialogHeader>
+               <div className="grid gap-2">
+                   <Label htmlFor="save-password">Admin Password</Label>
+                   <Input
+                       id="save-password"
+                       type="password"
+                       value={deletePassword}
+                       onChange={(e) => setDeletePassword(e.target.value)}
+                       className="bg-gray-800 border-white/20 text-white"
+                       onKeyPress={(e) => { if (e.key === 'Enter') confirmSaveWithPassword(); }}
+                   />
+               </div>
+               <AlertDialogFooter>
+                   <AlertDialogCancel onClick={() => {setShowPasswordDialog(false); setDeletePassword('');}} className="border-white/20 text-white hover:bg-white/10">Cancel</AlertDialogCancel>
+                   <AlertDialogAction
+                       onClick={confirmSaveWithPassword}
+                       disabled={isSaving}
+                       className="bg-blue-600 hover:bg-blue-700"
+                   >
+                       {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Confirm Update'}
+                   </AlertDialogAction>
+               </AlertDialogFooter>
+           </AlertDialogContent>
+        </AlertDialog>
     </div>
   );
 };
 
 export default CreateWagesPage;
-

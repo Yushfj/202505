@@ -1,4 +1,3 @@
-
 'use client';
 
 import {useEffect, useState, useMemo, useCallback} from 'react';
@@ -32,7 +31,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import {useRouter} from 'next/navigation';
 import * as XLSX from 'xlsx';
@@ -61,7 +59,9 @@ interface WageRecord {
   employeeId: string;
   employeeName: string;
   hourlyWage: number;
+  totalHours: number; // Added total hours
   hoursWorked: number;
+  overtimeHours: number;
   mealAllowance: number;
   fnpfDeduction: number;
   otherDeductions: number;
@@ -160,16 +160,26 @@ const WagesRecordsPage = () => {
     // Group the fetched records (which might already be filtered by the DB)
     const grouped = allWageRecords.reduce((acc: {[key: string]: GroupedWageRecord}, record) => {
       // Parse dates fetched as strings (YYYY-MM-DD)
-      const dateFrom = parseISO(record.dateFrom + 'T00:00:00'); // Add time part for correct parsing
-      const dateTo = parseISO(record.dateTo + 'T00:00:00');
+      // Ensure date strings are correctly formatted before parsing
+      const validDateFromStr = /^\d{4}-\d{2}-\d{2}$/.test(record.dateFrom) ? record.dateFrom : null;
+      const validDateToStr = /^\d{4}-\d{2}-\d{2}$/.test(record.dateTo) ? record.dateTo : null;
+
+      if (!validDateFromStr || !validDateToStr) {
+          console.warn("Skipping record with invalid date string format:", record);
+          return acc; // Skip records with invalid date strings
+      }
+
+      const dateFrom = parseISO(validDateFromStr + 'T00:00:00'); // Add time part for correct parsing
+      const dateTo = parseISO(validDateToStr + 'T00:00:00');
+
 
       if (!isValid(dateFrom) || !isValid(dateTo)) {
-        console.warn("Skipping record with invalid date during grouping:", record);
+        console.warn("Skipping record with invalid parsed date during grouping:", record, dateFrom, dateTo);
         return acc; // Skip invalid records
       }
 
       // Use a consistent key format (YYYY-MM-DD_YYYY-MM-DD)
-      const payPeriodKey = `${record.dateFrom}_${record.dateTo}`;
+      const payPeriodKey = `${validDateFromStr}_${validDateToStr}`;
 
       if (!acc[payPeriodKey]) {
         acc[payPeriodKey] = {
@@ -346,12 +356,13 @@ const WagesRecordsPage = () => {
     } else if (formatType === 'Excel') {
         const excelData = [
             [ // Headers
-                'Employee Name', 'Hourly Wage', 'Hours Worked', 'Meal Allowance',
+                'Employee Name', 'Hourly Wage', 'Total Hours', 'Normal Hours', 'Overtime Hours', 'Meal Allowance', // Updated headers
                 'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
                 'Date From', 'Date To',
             ],
             ...recordsToExport.map(record => [ // Data rows
-                record.employeeName, record.hourlyWage.toFixed(2), record.hoursWorked.toFixed(2),
+                record.employeeName, record.hourlyWage.toFixed(2),
+                record.totalHours.toFixed(2), record.hoursWorked.toFixed(2), record.overtimeHours?.toFixed(2) || '0.00', // Include new fields
                 record.mealAllowance.toFixed(2),
                 record.fnpfDeduction.toFixed(2), record.otherDeductions.toFixed(2),
                 record.grossPay.toFixed(2), record.netPay.toFixed(2),
@@ -359,11 +370,15 @@ const WagesRecordsPage = () => {
                 record.dateTo,   // Use the YYYY-MM-DD string directly
             ]),
             [ // Totals row
-                'Totals', '', '', '', // Spacers for name, wage, hours, meal
-                recordsToExport.reduce((sum, r) => sum + r.fnpfDeduction, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.otherDeductions, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.netPay, 0).toFixed(2),
+                'Totals', '', // Spacers for name, wage
+                recordsToExport.reduce((sum, r) => sum + r.totalHours, 0).toFixed(2), // Total Total Hours
+                recordsToExport.reduce((sum, r) => sum + r.hoursWorked, 0).toFixed(2), // Total Normal Hours
+                recordsToExport.reduce((sum, r) => sum + (r.overtimeHours || 0), 0).toFixed(2), // Total OT Hours
+                recordsToExport.reduce((sum, r) => sum + r.mealAllowance, 0).toFixed(2), // Total Meal Allowance
+                recordsToExport.reduce((sum, r) => sum + r.fnpfDeduction, 0).toFixed(2), // Total FNPF
+                recordsToExport.reduce((sum, r) => sum + r.otherDeductions, 0).toFixed(2), // Total Other Ded
+                recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2), // Total Gross Pay
+                recordsToExport.reduce((sum, r) => sum + r.netPay, 0).toFixed(2), // Total Net Pay
                 '', '', // Spacers for dates
             ],
         ];
@@ -371,8 +386,8 @@ const WagesRecordsPage = () => {
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.aoa_to_sheet(excelData);
         ws['!cols'] = [ // Adjust widths
-          {wch: 20}, {wch: 12}, {wch: 12}, {wch: 15}, {wch: 15},
-          {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}
+          {wch: 20}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 14}, {wch: 15}, // Name, Wage, TotHrs, NormalHrs, OT Hrs, Meal
+          {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12} // FNPF, Other Ded, Gross, Net, DateFrom, DateTo
         ];
         XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
         XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
@@ -542,7 +557,9 @@ const WagesRecordsPage = () => {
                              <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
                              <TableHead className="text-white border-r border-white/20">Account #</TableHead>
                              <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
-                             <TableHead className="text-white border-r border-white/20 text-right">Hours</TableHead>
+                             <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* Updated Header */}
+                             <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead> {/* Updated Header */}
+                             <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead> {/* Added O/T Header */}
                              <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
                              <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
                              <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
@@ -563,7 +580,9 @@ const WagesRecordsPage = () => {
                                  <TableCell className="text-white border-r border-white/20">{displayBankCode}</TableCell>
                                  <TableCell className="text-white border-r border-white/20">{displayAccountNum}</TableCell>
                                  <TableCell className="text-white border-r border-white/20 text-right">${record.hourlyWage?.toFixed(2)}</TableCell>
-                                 <TableCell className="text-white border-r border-white/20 text-right">{record.hoursWorked?.toFixed(2)}</TableCell>
+                                 <TableCell className="text-white border-r border-white/20 text-right">{record.totalHours?.toFixed(2)}</TableCell> {/* Display Total Hours */}
+                                 <TableCell className="text-white border-r border-white/20 text-right">{record.hoursWorked?.toFixed(2)}</TableCell> {/* Display Normal Hours */}
+                                 <TableCell className="text-white border-r border-white/20 text-right">{record.overtimeHours?.toFixed(2) || '0.00'}</TableCell> {/* Display O/T Hours */}
                                  <TableCell className="text-white border-r border-white/20 text-right">${record.mealAllowance?.toFixed(2)}</TableCell>
                                  <TableCell className="text-white border-r border-white/20 text-right">{displayFNPF}</TableCell>
                                  <TableCell className="text-white border-r border-white/20 text-right">${record.otherDeductions?.toFixed(2)}</TableCell>
