@@ -1,836 +1,438 @@
 'use client';
 
-import {useState, useEffect, useMemo, useCallback} from 'react';
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import Image from 'next/image';
+import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
+import { addEmployee, checkExistingFNPFNo } from '@/services/employee-service'; // Import service functions including the checker
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { ArrowLeft, Home, Loader2 } from "lucide-react"; // Added Loader2 icon
 import Link from "next/link";
-import {useToast} from '@/hooks/use-toast';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {Button} from '@/components/ui/button';
-import {Calendar} from '@/components/ui/calendar';
-import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
-import {cn} from '@/lib/utils';
-import {format, isValid, parseISO} from 'date-fns'; // Import isValid and parseISO for date validation
-import {CalendarIcon, ArrowLeft, Home, FileDown, FileText, Save, Loader2} from 'lucide-react'; // Added Loader2
-import {DateRange} from 'react-day-picker';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {Input} from '@/components/ui/input';
-import {Label} from '@/components/ui/label';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-// Import DB service functions
-import { getEmployees, saveWageRecords, getWageRecords, checkWageRecordsExist } from '@/services/employee-service';
-import * as XLSX from 'xlsx';
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox"
 
-
-// --- Constants ---
-const OVERTIME_RATE = 1.5;
-const STANDARD_NORMAL_HOURS_THRESHOLD = 45; // Changed from 40 to 45
-const SPECIAL_EMPLOYEE_NAME = "Bimlesh Shashi Prakash";
-const SPECIAL_NORMAL_HOURS_THRESHOLD = 48;
-
-
-// --- Interfaces ---
-// Matches the structure in employee-service.ts
-interface Employee {
-  id: string;
+// Employee data type (excluding ID for creation)
+// Matches the type used in the service
+type EmployeeData = {
   name: string;
   position: string;
-  hourlyWage: string; // Still string from DB initially
-  fnpfNo: string | null;
-  tinNo: string | null;
-  bankCode: string | null;
-  bankAccountNumber: string | null;
+  hourlyWage: string;
+  fnpfNo: string | null; // Allow null
+  tinNo: string | null; // Allow null
+  bankCode: string | null; // Allow null
+  bankAccountNumber: string | null; // Allow null
   paymentMethod: 'cash' | 'online';
   branch: 'labasa' | 'suva';
   fnpfEligible: boolean;
-}
+};
 
-// Combined interface for wage input details stored in state
-interface WageInputDetails {
-    totalHours: string; // User enters total hours here
-    hoursWorked: string; // Normal hours (calculated)
-    overtimeHours: string; // Overtime hours (calculated)
-    mealAllowance: string;
-    otherDeductions: string;
-}
+const CreateEmployeePage = () => {
+  const [formData, setFormData] = useState<EmployeeData>({
+    name: '',
+    position: '',
+    hourlyWage: '',
+    fnpfNo: '', // Initialize as empty string, will be set to null if not eligible
+    tinNo: '', // Initialize as empty string, will be set to null if needed
+    bankCode: '', // Default to empty, required only if paymentMethod is 'online'
+    bankAccountNumber: '', // Default to empty, required only if paymentMethod is 'online'
+    paymentMethod: 'cash',
+    branch: 'labasa',
+    fnpfEligible: true, // Default to true
+  });
+  const [isLoading, setIsLoading] = useState(false); // State for loading indicator
+  const { toast } = useToast();
+  const router = useRouter();
 
-// Interface for wage records saved to the database
-interface WageRecord {
-  employeeId: string;
-  employeeName: string;
-  hourlyWage: number;
-  totalHours: number; // Store total hours
-  hoursWorked: number; // Store normal hours
-  overtimeHours: number; // Store overtime hours
-  mealAllowance: number;
-  fnpfDeduction: number;
-  otherDeductions: number;
-  grossPay: number;
-  netPay: number;
-  dateFrom: string; // Store dates as YYYY-MM-DD strings for DB compatibility
-  dateTo: string;
-}
+  // Generic handler for most input changes
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { id, value } = e.target;
+    setFormData(prev => ({ ...prev, [id]: value }));
+  };
 
-// Interface for calculated wage data displayed in the table
-interface CalculatedWageInfo {
-    employeeId: string;
-    employeeName: string;
-    bankCode: string | null;
-    bankAccountNumber: string | null;
-    hourlyWage: number;
-    totalHours: number; // Added total hours
-    hoursWorked: number; // Normal hours
-    overtimeHours: number; // Overtime hours
-    mealAllowance: number;
-    otherDeductions: number;
-    grossPay: number;
-    fnpfDeduction: number;
-    netPay: number;
-    fnpfEligible: boolean; // Needed for display logic
-    paymentMethod: 'cash' | 'online';
-    branch: 'labasa' | 'suva';
-}
+  // Handler for Select components (Bank Code)
+  const handleBankCodeChange = (value: string) => {
+    setFormData(prev => ({ ...prev, bankCode: value }));
+  };
 
+  // Handler for RadioGroup changes (Branch, Payment Method)
+  const handleRadioChange = (field: keyof EmployeeData, value: 'labasa' | 'suva' | 'cash' | 'online') => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+     // Reset bank details if switching to cash
+     if (field === 'paymentMethod' && value === 'cash') {
+        setFormData(prev => ({ ...prev, bankCode: '', bankAccountNumber: '' }));
+    }
+  };
 
-// --- Component ---
-const CreateWagesPage = () => {
-  // --- State ---
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  // Single state object for wage input details, keyed by employee ID
-  const [wageInputMap, setWageInputMap] = useState<{ [employeeId: string]: WageInputDetails }>({});
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-  const [isLoading, setIsLoading] = useState(true); // Loading state for employees
-  const [isSaving, setIsSaving] = useState(false); // Saving state for buttons
-  const {toast} = useToast();
-  const [deletePassword, setDeletePassword] = useState('');
-  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-  const ADMIN_PASSWORD = 'admin01'; // Store securely in a real application
-
-  // State for totals
-  const [totalTotalHours, setTotalTotalHours] = useState<number>(0); // Total hours entered
-  const [totalHoursWorked, setTotalHoursWorked] = useState<number>(0); // Total normal hours
-  const [totalOvertimeHours, setTotalOvertimeHours] = useState<number>(0); // Total overtime hours
-  const [totalMealAllowance, setTotalMealAllowance] = useState<number>(0);
-  const [totalOtherDeductions, setTotalOtherDeductions] = useState<number>(0);
-  const [totalFnpfDeduction, setTotalFnpfDeduction] = useState<number>(0);
-  const [totalNetPay, setTotalNetPay] = useState<number>(0);
-  const [totalSuvaWages, setTotalSuvaWages] = useState<number>(0);
-  const [totalLabasaWages, setTotalLabasaWages] = useState<number>(0);
-  const [totalCashWages, setTotalCashWages] = useState<number>(0);
-
-
-  // --- Data Fetching ---
-  const fetchEmployeesCallback = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const fetchedEmployees = await getEmployees(); // Use DB service function
-      if (Array.isArray(fetchedEmployees)) {
-        setEmployees(fetchedEmployees);
-        // Initialize wageInputMap based on fetched employees
-        const initialWageInputs: { [employeeId: string]: WageInputDetails } = {};
-        fetchedEmployees.forEach((emp: Employee) => {
-          initialWageInputs[emp.id] = { totalHours: '', hoursWorked: '0', overtimeHours: '0', mealAllowance: '', otherDeductions: '' };
-        });
-        setWageInputMap(initialWageInputs);
-      } else {
-          console.error("Fetched employee data is not an array:", fetchedEmployees);
-          setEmployees([]);
-          setWageInputMap({});
+  // Handler for Checkbox change (FNPF Eligibility)
+  const handleCheckboxChange = (checked: boolean | string) => {
+      const isEligible = Boolean(checked); // Ensure boolean value
+      setFormData(prev => ({ ...prev, fnpfEligible: isEligible }));
+      // Clear FNPF No if not eligible
+      if (!isEligible) {
+          setFormData(prev => ({ ...prev, fnpfNo: '' }));
       }
-    } catch (error: any) {
-      console.error("Error fetching employees:", error);
+  };
+
+  // Form validation logic
+  const validateForm = (): boolean => {
+    const { name, position, hourlyWage, fnpfNo, bankCode, bankAccountNumber, paymentMethod, fnpfEligible } = formData;
+    let isValid = true;
+    const errors: string[] = [];
+
+    if (!name.trim()) errors.push('Employee Name is required.');
+    if (!position.trim()) errors.push('Employee Position is required.');
+    if (!hourlyWage.trim()) {
+        errors.push('Hourly Wage is required.');
+    } else {
+        const wageAsNumber = parseFloat(hourlyWage);
+        if (isNaN(wageAsNumber) || wageAsNumber < 0) {
+            errors.push('Hourly Wage must be a valid non-negative number.');
+        }
+    }
+
+    // Check FNPF number validity ONLY IF eligible and the input is not empty
+    if (fnpfEligible && !fnpfNo?.trim()) {
+        errors.push('FNPF Number is required when employee is FNPF eligible.');
+    } else if (fnpfEligible && fnpfNo && fnpfNo.trim().length > 0 && !/^\d+$/.test(fnpfNo.trim())) {
+        // Optional: Add regex check if FNPF needs to be numeric
+        // errors.push('FNPF Number must contain only digits.');
+    }
+
+
+    if (paymentMethod === 'online') {
+      if (!bankCode) errors.push('Bank Code is required for online transfer.');
+      if (!bankAccountNumber?.trim()) { // Check bankAccountNumber?.trim()
+        errors.push('Bank Account Number is required for online transfer.');
+      }
+    }
+
+    if (errors.length > 0) {
       toast({
-        title: 'Error Loading Employees',
-        description: error.message || 'Failed to load employee data.',
+        title: 'Validation Error',
+        description: errors.join(' '),
         variant: 'destructive',
       });
-      setEmployees([]);
-      setWageInputMap({});
-    } finally {
-      setIsLoading(false);
+      isValid = false;
     }
-  }, [toast]); // Dependency array includes toast
 
-  useEffect(() => {
-    fetchEmployeesCallback();
-  }, [fetchEmployeesCallback]); // Runs once on mount due to useCallback
-
-  // --- Input Handlers ---
-  // Handles changes to Meal Allowance and Other Deductions
-  const handleWageInputChange = (employeeId: string, field: keyof Omit<WageInputDetails, 'totalHours' | 'hoursWorked' | 'overtimeHours'>, value: string) => {
-    // Basic input validation: allow only numbers and optionally a decimal point
-    const sanitizedValue = value.replace(/[^0-9.]/g, '');
-    // Prevent multiple decimal points
-    if ((sanitizedValue.match(/\./g) || []).length > 1) {
-      return; // Don't update state if invalid number format
-    }
-    setWageInputMap(prev => ({
-      ...prev,
-      [employeeId]: { ...prev[employeeId], [field]: sanitizedValue },
-    }));
+    return isValid;
   };
 
-   // Handles changes to the Total Hours input
-   const handleTotalHoursChange = (employeeId: string, totalHoursStr: string) => {
-       // Basic validation for total hours input
-       const sanitizedValue = totalHoursStr.replace(/[^0-9.]/g, '');
-       if ((sanitizedValue.match(/\./g) || []).length > 1) {
-           return;
-       }
-
-       const totalHoursNum = parseFloat(sanitizedValue || '0') || 0;
-
-       // Find the employee to check for the special case
-       const employee = employees.find(emp => emp.id === employeeId);
-       const normalHoursThreshold = employee?.name === SPECIAL_EMPLOYEE_NAME
-           ? SPECIAL_NORMAL_HOURS_THRESHOLD
-           : STANDARD_NORMAL_HOURS_THRESHOLD;
-
-       // Calculate normal and overtime hours based on the threshold
-       const normalHours = Math.min(totalHoursNum, normalHoursThreshold);
-       const overtimeHours = Math.max(0, totalHoursNum - normalHoursThreshold);
-
-       // Update the state for this employee
-       setWageInputMap(prev => ({
-           ...prev,
-           [employeeId]: {
-               ...prev[employeeId],
-               totalHours: sanitizedValue, // Store the raw sanitized input string
-               hoursWorked: normalHours.toFixed(2), // Store calculated normal hours as string
-               overtimeHours: overtimeHours.toFixed(2), // Store calculated overtime hours as string
-           },
-       }));
-   };
-
-  // --- Calculations (Memoized) ---
-  const calculatedWageData = useMemo(() => {
-    const calculatedMap: { [employeeId: string]: CalculatedWageInfo } = {};
-    let runningTotalTotalHrs = 0;
-    let runningTotalHours = 0;
-    let runningTotalOvertime = 0;
-    let runningTotalMeal = 0;
-    let runningTotalOtherDed = 0;
-    let runningTotalFnpf = 0;
-    let runningTotalNet = 0;
-    let runningTotalSuva = 0;
-    let runningTotalLabasa = 0;
-    let runningTotalCash = 0;
-
-
-    employees.forEach(employee => {
-      const inputs = wageInputMap[employee.id] || { totalHours: '0', hoursWorked: '0', overtimeHours: '0', mealAllowance: '0', otherDeductions: '0' };
-      const hourlyWage = parseFloat(employee.hourlyWage || '0') || 0;
-      // Use the calculated hours from the state (derived from totalHours)
-      const totalHours = parseFloat(inputs.totalHours || '0') || 0;
-      const hoursWorked = parseFloat(inputs.hoursWorked || '0') || 0; // These are calculated in handleTotalHoursChange
-      const overtimeHours = parseFloat(inputs.overtimeHours || '0') || 0; // These are calculated in handleTotalHoursChange
-      const mealAllowance = parseFloat(inputs.mealAllowance || '0') || 0;
-      const otherDeductions = parseFloat(inputs.otherDeductions || '0') || 0;
-
-      // Validate inputs are non-negative numbers
-      if (isNaN(hourlyWage) || hourlyWage < 0 || isNaN(totalHours) || totalHours < 0 || isNaN(mealAllowance) || mealAllowance < 0 || isNaN(otherDeductions) || otherDeductions < 0) {
-          console.warn(`Skipping wage calculation for ${employee.name} due to invalid input.`);
-          // Provide default values for display
-          calculatedMap[employee.id] = {
-            employeeId: employee.id, employeeName: employee.name, bankCode: employee.bankCode,
-            bankAccountNumber: employee.bankAccountNumber, hourlyWage: 0, totalHours: 0, hoursWorked: 0, overtimeHours: 0,
-            mealAllowance: 0, otherDeductions: 0, grossPay: 0, fnpfDeduction: 0, netPay: 0,
-            fnpfEligible: employee.fnpfEligible, paymentMethod: employee.paymentMethod, branch: employee.branch
-          };
-         return; // Go to the next employee
-      }
-
-      // Calculate pay components
-      const regularPay = hourlyWage * hoursWorked;
-      const overtimePay = overtimeHours * hourlyWage * OVERTIME_RATE;
-      // Gross Pay includes regular pay, overtime pay, and meal allowance
-      const grossPay = regularPay + overtimePay + mealAllowance;
-
-      // FNPF calculation based *only* on regular pay (normal hours * hourly wage)
-      let fnpfDeduction = 0;
-      if (employee.fnpfEligible && regularPay > 0) {
-        fnpfDeduction = regularPay * 0.08; // FNPF is 8% of regular pay
-      }
-
-      // Net Pay calculation: Gross Pay minus FNPF and Other Deductions
-      const netPay = Math.max(0, grossPay - fnpfDeduction - otherDeductions); // Ensure net pay is not negative
-
-      calculatedMap[employee.id] = {
-        employeeId: employee.id,
-        employeeName: employee.name,
-        bankCode: employee.bankCode,
-        bankAccountNumber: employee.bankAccountNumber,
-        hourlyWage,
-        totalHours, // Included total hours
-        hoursWorked, // Normal hours
-        overtimeHours, // Overtime hours
-        mealAllowance,
-        otherDeductions,
-        grossPay,
-        fnpfDeduction,
-        netPay,
-        fnpfEligible: employee.fnpfEligible,
-        paymentMethod: employee.paymentMethod,
-        branch: employee.branch,
-      };
-
-      // Accumulate totals
-      runningTotalTotalHrs += totalHours;
-      runningTotalHours += hoursWorked;
-      runningTotalOvertime += overtimeHours;
-      runningTotalMeal += mealAllowance;
-      runningTotalOtherDed += otherDeductions;
-      runningTotalFnpf += fnpfDeduction;
-      runningTotalNet += netPay;
-
-      if (employee.branch === 'suva') runningTotalSuva += netPay;
-      if (employee.branch === 'labasa') runningTotalLabasa += netPay;
-      if (employee.paymentMethod === 'cash') runningTotalCash += netPay;
-    });
-
-    // Set totals state outside the loop
-    setTotalTotalHours(runningTotalTotalHrs);
-    setTotalHoursWorked(runningTotalHours);
-    setTotalOvertimeHours(runningTotalOvertime);
-    setTotalMealAllowance(runningTotalMeal);
-    setTotalOtherDeductions(runningTotalOtherDed);
-    setTotalFnpfDeduction(runningTotalFnpf);
-    setTotalNetPay(runningTotalNet);
-    setTotalSuvaWages(runningTotalSuva);
-    setTotalLabasaWages(runningTotalLabasa);
-    setTotalCashWages(runningTotalCash);
-
-
-    // No need to return totals here as they are managed by state now
-    return { calculatedMap }; // Return only the map
-
-  }, [employees, wageInputMap]); // Recalculate when employees or inputs change
-
-
-  // --- Helper Functions ---
-  const getCurrentWageRecordsForDb = (): WageRecord[] => {
-    if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-      toast({ title: 'Error', description: 'Valid date range missing.', variant: 'destructive' });
-      return [];
+  // Form submission handler
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    console.log("Form submitted. Validating...");
+    if (!validateForm()) {
+        console.log("Validation failed.");
+        return;
     }
-    const records: WageRecord[] = [];
-    employees.forEach(employee => {
-      const calculatedDetails = calculatedWageData.calculatedMap[employee.id];
-      // Ensure calculation was successful and inputs are valid before adding
-       if (calculatedDetails && calculatedDetails.totalHours >= 0 && calculatedDetails.mealAllowance >= 0 && calculatedDetails.otherDeductions >= 0) {
-         // Only include records where totalHours > 0 or other fields have values? (Optional)
-         // if (calculatedDetails.totalHours > 0 || calculatedDetails.mealAllowance > 0 || calculatedDetails.otherDeductions > 0) {
-            records.push({
-              employeeId: calculatedDetails.employeeId,
-              employeeName: calculatedDetails.employeeName,
-              hourlyWage: calculatedDetails.hourlyWage,
-              totalHours: calculatedDetails.totalHours, // Include total hours
-              hoursWorked: calculatedDetails.hoursWorked, // Normal hours
-              overtimeHours: calculatedDetails.overtimeHours, // Overtime hours
-              mealAllowance: calculatedDetails.mealAllowance,
-              otherDeductions: calculatedDetails.otherDeductions,
-              grossPay: calculatedDetails.grossPay,
-              fnpfDeduction: calculatedDetails.fnpfEligible ? calculatedDetails.fnpfDeduction : 0, // Only include FNPF if eligible
-              netPay: calculatedDetails.netPay,
-              // Format dates as 'YYYY-MM-DD' strings for DB
-              dateFrom: format(dateRange.from!, 'yyyy-MM-dd'),
-              dateTo: format(dateRange.to!, 'yyyy-MM-dd'),
-            });
-         // }
-       }
-    });
-    return records;
-  };
+    if (isLoading) {
+        console.log("Submission blocked: Already processing.");
+        return; // Prevent multiple submissions
+    }
 
-  const resetForm = useCallback(() => {
-       setDateRange(undefined);
-       const initialWageInputs: { [employeeId: string]: WageInputDetails } = {};
-       employees.forEach(emp => {
-           initialWageInputs[emp.id] = { totalHours: '', hoursWorked: '0', overtimeHours: '0', mealAllowance: '', otherDeductions: '' };
-       });
-       setWageInputMap(initialWageInputs);
-   }, [employees]);
+    console.log("Validation passed. Starting submission process...");
+    setIsLoading(true); // Start loading indicator
 
-  // --- Event Handlers (Save, Export) ---
-  const handleSaveWages = async () => {
-       if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-         toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' });
-         return;
-       }
-
-       const recordsToSave = getCurrentWageRecordsForDb();
-       if (recordsToSave.length === 0) {
-         toast({ title: 'Info', description: 'No valid wage data calculated to save.', variant: 'default' });
-         return;
-       }
-
-       setIsSaving(true);
-       try {
-           // Check if records exist for this period
-           const recordsExist = await checkWageRecordsExist(dateRange.from, dateRange.to);
-
-           if (recordsExist) {
-               // If records exist, prompt for admin password
-               setShowPasswordDialog(true);
-           } else {
-               // If no records exist, save directly
-               await saveWageRecords(recordsToSave);
-               toast({ title: 'Success', description: 'Wages calculated and recorded successfully!' });
-               resetForm(); // Clear form after successful save
-           }
-       } catch (error: any) {
-           console.error('Error during save process:', error);
-           toast({ title: 'Save Error', description: error.message || 'Failed to check or save wage records.', variant: 'destructive' });
-       } finally {
-           setIsSaving(false);
-       }
-     };
-
-   // Function called when password confirmation is submitted for saving/overwriting
-   const confirmSaveWithPassword = async () => {
-       if (deletePassword !== ADMIN_PASSWORD) {
-           toast({ title: 'Error', description: 'Incorrect admin password.', variant: 'destructive' });
-           return; // Stop the process
-       }
-
-       // Close dialog first
-       setShowPasswordDialog(false);
-       setDeletePassword(''); // Clear password
-
-       const recordsToSave = getCurrentWageRecordsForDb();
-       if (recordsToSave.length === 0) {
-           toast({ title: 'Info', description: 'No valid wage data to save.', variant: 'default' });
-           return;
-       }
-
-       setIsSaving(true);
-       try {
-           // Call the service function to save/overwrite records in DB
-           await saveWageRecords(recordsToSave); // This will handle deleting existing records first.
-           toast({ title: 'Success', description: 'Wages updated successfully!' });
-           resetForm(); // Clear form after successful update
-       } catch (error: any) {
-           console.error('Error updating wage records:', error);
-           toast({ title: 'Update Error', description: error.message || 'Failed to update wage records.', variant: 'destructive' });
-       } finally {
-           setIsSaving(false);
-       }
-   };
-
-
-    // Function to handle exporting data (CSV or Excel)
-    const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
-        if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-            toast({ title: 'Error', description: 'Please select a valid date range before exporting.', variant: 'destructive' });
-            return;
-        }
-
-        // Use the calculated data directly
-        const recordsToExport = Object.values(calculatedWageData.calculatedMap)
-            .filter(Boolean) as CalculatedWageInfo[]; // Filter out potential undefined values
-
-        if (recordsToExport.length === 0) {
-            toast({ title: 'Error', description: 'No valid wage records calculated to export.', variant: 'destructive' });
-            return;
-        }
-
-        const fileNameBase = `wage_records_${format(dateRange.from, 'yyyyMMdd')}_${format(dateRange.to, 'yyyyMMdd')}`;
-
-        if (formatType === 'BSP' || formatType === 'BRED') {
-            // Filter for online transfer employees ONLY for BSP/BRED formats
-             const onlineTransferRecords = recordsToExport.filter(record => record.paymentMethod === 'online');
-
-            if (onlineTransferRecords.length === 0) {
-                toast({ title: 'Info', description: `No online transfer employees for ${formatType} export.`, variant: 'default' });
-                return;
-            }
-
-            let csvData = '';
-            let fileName = `${fileNameBase}_${formatType}.csv`;
-
-            if (formatType === 'BSP') {
-                const csvRows: string[] = []; // No header row for BSP
-                onlineTransferRecords.forEach(record => {
-                    csvRows.push([
-                        record.bankCode || '',
-                        record.bankAccountNumber || '',
-                        record.netPay.toFixed(2),
-                        'Salary', // Column 4
-                        record.employeeName, // Column 5
-                    ].join(','));
-                });
-                csvData = csvRows.join('\n');
-            } else { // BRED format
-                const csvRows = [
-                    ['BIC', 'Employee', 'Employee', 'Account N', 'Amount', 'Purpose of Note (optional)'].join(',') // Header
-                ];
-                onlineTransferRecords.forEach(record => {
-                    csvRows.push([
-                        record.bankCode || '', // BIC
-                        record.employeeName, // Employee 1
-                        '', // Empty Employee 2 Column
-                        record.bankAccountNumber || '', // Account N
-                        record.netPay.toFixed(2), // Amount
-                        'Salary', // Purpose
-                    ].join(','));
-                });
-                csvData = csvRows.join('\n');
-            }
-
-            const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', fileName);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
-
-        } else if (formatType === 'Excel') {
-            const excelData = [
-                [ // Headers
-                    'Employee Name', 'Bank Code', 'Account #', 'Hourly Wage', 'Total Hours', 'Normal Hours', 'Overtime Hours', // Added Total Hours header
-                    'Meal Allowance', 'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
-                    'Date From', 'Date To', 'FNPF Eligible', 'Branch', 'Payment Method'
-                ],
-                // Use ALL calculated records for Excel export
-                ...recordsToExport.map(record => [
-                    record.employeeName,
-                    record.bankCode || 'N/A',
-                    record.bankAccountNumber || 'N/A',
-                    record.hourlyWage.toFixed(2),
-                    record.totalHours.toFixed(2), // Added total hours value
-                    record.hoursWorked.toFixed(2),
-                    record.overtimeHours.toFixed(2),
-                    record.mealAllowance.toFixed(2), // Include meal allowance
-                    record.fnpfEligible ? record.fnpfDeduction.toFixed(2) : 'N/A', // Only show FNPF if eligible
-                    record.otherDeductions.toFixed(2),
-                    record.grossPay.toFixed(2),
-                    record.netPay.toFixed(2),
-                    format(dateRange.from!, 'yyyy-MM-dd'),
-                    format(dateRange.to!, 'yyyy-MM-dd'),
-                    record.fnpfEligible ? 'Yes' : 'No',
-                    record.branch, // Add branch
-                    record.paymentMethod, // Add payment method
-                ]),
-                 [ // Totals row
-                     'Totals', '', '', '', // Spacers for name, bank details, wage
-                     totalTotalHours.toFixed(2), // Total Total Hours
-                     totalHoursWorked.toFixed(2), // Total Normal Hours
-                     totalOvertimeHours.toFixed(2), // Total Overtime Hours
-                     totalMealAllowance.toFixed(2), // Total Meal Allowance
-                     totalFnpfDeduction.toFixed(2), // Total FNPF
-                     totalOtherDeductions.toFixed(2), // Total Other Deductions
-                     recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2), // Gross Pay Total
-                     totalNetPay.toFixed(2), // Net Pay Total
-                     '', '', '', '', '' // Spacers for dates, eligibility, branch, payment
-                 ],
-            ];
-
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            // Optional: Adjust column widths
-            ws['!cols'] = [
-              {wch: 20}, {wch: 10}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 14}, // Name, Bank, Acct, Wage, TotalHrs, NormalHrs, OTHrs
-              {wch: 15}, {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, // Meal, FNPF, Other, Gross, Net
-              {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10}, {wch: 12} // DateFrom, DateTo, Eligible, Branch, Payment
-            ];
-            XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
-            XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
-            toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' });
-        }
+    // Prepare data for saving (ensure correct types and nulls)
+    const employeeDataToSave: EmployeeData = {
+        ...formData,
+        fnpfNo: formData.fnpfEligible ? (formData.fnpfNo?.trim() || null) : null, // Ensure null if empty or ineligible
+        tinNo: formData.tinNo?.trim() ? formData.tinNo : null, // Set to null if empty
+        bankCode: formData.paymentMethod === 'online' ? (formData.bankCode || null) : null,
+        bankAccountNumber: formData.paymentMethod === 'online' ? (formData.bankAccountNumber?.trim() || null) : null, // Trim and ensure null
     };
 
-  // --- Render ---
+    console.log('Data prepared for saving:', employeeDataToSave);
+
+    try {
+        // --- Check for existing FNPF Number before attempting to add ---
+        if (employeeDataToSave.fnpfEligible && employeeDataToSave.fnpfNo) {
+            console.log(`Checking if FNPF No ${employeeDataToSave.fnpfNo} already exists...`);
+            const existingEmployee = await checkExistingFNPFNo(employeeDataToSave.fnpfNo);
+            if (existingEmployee) {
+                toast({
+                    title: 'Duplicate FNPF Number',
+                    description: `An employee with FNPF Number ${employeeDataToSave.fnpfNo} already exists.`,
+                    variant: 'destructive',
+                });
+                console.error(`Duplicate FNPF Number detected: ${employeeDataToSave.fnpfNo}`);
+                setIsLoading(false); // Stop loading
+                return; // Stop the submission
+            }
+             console.log(`FNPF No ${employeeDataToSave.fnpfNo} is unique. Proceeding...`);
+        }
+        // --- End FNPF Check ---
+
+      console.log('Attempting to call addEmployee service...');
+      await addEmployee(employeeDataToSave); // Call the service function
+      console.log('addEmployee service call successful.');
+
+      toast({
+        title: 'Success',
+        description: 'Employee created successfully!',
+      });
+
+      console.log('Redirecting to /employees/information');
+      // Redirect to the employee information page after success
+      router.push('/employees/information');
+
+    } catch (error: any) {
+      console.error('Error during employee creation process:', error); // Log the full error object
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+
+      toast({
+        title: 'Error Creating Employee',
+        // Display the specific error message from the backend/service if available
+        description: error.message || 'Failed to save employee data. Check console for details.',
+        variant: 'destructive',
+      });
+    } finally {
+      console.log("Finishing submission process.");
+      setIsLoading(false); // Stop loading indicator regardless of outcome
+    }
+  };
+
   return (
-    <div className="relative flex flex-col items-center min-h-screen text-white font-sans">
+    <div className="relative flex flex-col items-center justify-center min-h-screen font-sans text-white">
       {/* Background Image */}
       <Image
         src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
         alt="Background Image"
         fill
         style={{objectFit: 'cover'}}
-        className="absolute inset-0 w-full h-full -z-10"
+        className="absolute top-0 left-0 w-full h-full -z-10"
         priority
       />
+
       {/* Overlay */}
-      <div className="absolute inset-0 w-full h-full bg-black/60 -z-9" />
+      <div className="absolute top-0 left-0 w-full h-full bg-black opacity-50 -z-9" />
 
-      {/* Content Area */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center">
-        {/* Header */}
-        <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-8 sm:mb-10 md:mb-12">
-          <Link href="/wages" passHref>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-              <ArrowLeft className="h-5 w-5" />
-              <span className="sr-only">Back to Wages Management</span>
-            </Button>
-          </Link>
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100">
-            Calculate Wages
-          </h1>
-          <Link href="/dashboard" passHref>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-              <Home className="h-5 w-5" />
-              <span className="sr-only">Dashboard</span>
-            </Button>
-          </Link>
-        </header>
+       {/* Content Area */}
+        <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-center">
 
-        {/* Main Content */}
-        <main className="flex flex-col items-center flex-grow w-full pb-16">
-          <Card className="w-full max-w-7xl bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 p-4"> {/* Increased max-width */}
-             {/* Date Picker */}
-            <CardHeader className="pb-2">
-                <div className="flex justify-center mb-4">
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button
-                                id="date"
-                                variant={'outline'}
-                                className={cn(
-                                    'w-[240px] sm:w-[300px] justify-start text-left font-normal text-gray-900 bg-white hover:bg-gray-100',
-                                    !dateRange?.from && 'text-muted-foreground' // Use from date existence
-                                )}
-                            >
-                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                {dateRange?.from && isValid(dateRange.from) ? (
-                                    dateRange.to && isValid(dateRange.to) ? (
-                                        `${format(dateRange.from, 'LLL dd, yyyy')} - ${format(dateRange.to, 'LLL dd, yyyy')}`
-                                    ) : (
-                                        format(dateRange.from, 'LLL dd, yyyy')
-                                    )
-                                ) : (
-                                    <span>Pick a date range</span>
-                                )}
-                            </Button>
-                        </PopoverTrigger>
-                         <PopoverContent className="w-auto p-0 bg-white text-black" align="center">
-                             <Calendar
-                                 initialFocus
-                                 mode="range"
-                                 defaultMonth={dateRange?.from}
-                                 selected={dateRange}
-                                 onSelect={setDateRange}
-                                 numberOfMonths={1} // Simplified to one month
-                                 // Optional: Add restrictions if needed
-                                 // disabled={{ after: new Date() }}
-                             />
-                         </PopoverContent>
-                    </Popover>
-                </div>
+            <Card className="w-full max-w-md bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 z-10">
+            <CardHeader className="relative">
+            <Link href="/employees" className="absolute top-4 left-4" aria-label="Back to Employees">
+                <Button variant="ghost" size="icon">
+                    <ArrowLeft className="h-5 w-5 text-white" />
+                </Button>
+            </Link>
+            <CardTitle className="text-2xl text-white text-center pt-2">
+                New Employee
+            </CardTitle>
+            <Link href="/dashboard" className="absolute top-4 right-4" aria-label="Dashboard">
+                <Button variant="ghost" size="icon">
+                    <Home className="h-5 w-5 text-white" />
+                </Button>
+            </Link>
             </CardHeader>
-            <CardContent>
-                {/* Wage Calculation Table */}
-                 {isLoading ? (
-                    <div className="text-center text-white py-10 flex items-center justify-center">
-                       <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading employees...
-                    </div>
-                ) : employees.length === 0 ? (
-                    <div className="text-center text-gray-400 py-10">No employees found. Please add employees first.</div>
-                ) : (
-                    <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
-                    <Table>
-                        <TableHeader className="bg-white/10">
-                        <TableRow>
-                            <TableHead className="text-white border-r border-white/20">Employee</TableHead>
-                            <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
-                            <TableHead className="text-white border-r border-white/20">Account #</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Total Hours</TableHead> {/* New Total Hours */}
-                            <TableHead className="text-white border-r border-white/20 text-right">Normal Hours</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
-                            <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
-                            <TableHead className="text-white text-right">Net Pay</TableHead>
-                        </TableRow>
-                        </TableHeader>
-                         <TableBody>
-                           {employees.map(employee => {
-                                const calcDetails = calculatedWageData.calculatedMap[employee.id];
-                                // Use calculated details if available, otherwise show input fields and defaults
-                                const displayWage = calcDetails ? calcDetails.hourlyWage.toFixed(2) : (parseFloat(employee.hourlyWage) || 0).toFixed(2);
-                                // Only display FNPF deduction amount if the employee is eligible
-                                const displayFNPFDeduct = calcDetails?.fnpfEligible ? `$${(calcDetails.fnpfDeduction || 0).toFixed(2)}` : 'N/A';
-                                const displayNetPay = calcDetails ? `$${(calcDetails.netPay || 0).toFixed(2)}` : '$0.00';
-                                const displayBankCode = employee.paymentMethod === 'online' ? (employee.bankCode || 'N/A') : 'Cash';
-                                const displayAccountNum = employee.paymentMethod === 'online' ? (employee.bankAccountNumber || 'N/A') : 'N/A';
-                                const displayNormalHours = wageInputMap[employee.id]?.hoursWorked || '0.00';
-                                const displayOvertimeHours = wageInputMap[employee.id]?.overtimeHours || '0.00';
+            <CardContent className="grid gap-4">
+            <form onSubmit={handleSubmit}>
 
-                                return (
-                                    <TableRow key={employee.id} className="border-b transition-colors data-[state=selected]:bg-muted hover:bg-white/10">
-                                        <TableCell className="text-white border-r border-white/20">{employee.name}</TableCell>
-                                        <TableCell className="text-white border-r border-white/20">{displayBankCode}</TableCell>
-                                        <TableCell className="text-white border-r border-white/20">{displayAccountNum}</TableCell>
-                                        <TableCell className="text-white border-r border-white/20 text-right">${displayWage}</TableCell>
-                                        <TableCell className="border-r border-white/20"> {/* Total Hours Input */}
-                                            <Input
-                                                type="text"
-                                                pattern="[0-9]*\.?[0-9]*"
-                                                placeholder="Total"
-                                                value={wageInputMap[employee.id]?.totalHours || ''}
-                                                onChange={e => handleTotalHoursChange(employee.id, e.target.value)}
-                                                className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right"
-                                                inputMode="decimal"
-                                            />
-                                        </TableCell>
-                                        <TableCell className="text-white border-r border-white/20 text-right"> {/* Normal Hours Display */}
-                                            {displayNormalHours}
-                                        </TableCell>
-                                        <TableCell className="text-white border-r border-white/20 text-right"> {/* Overtime Hours Display */}
-                                            {displayOvertimeHours}
-                                        </TableCell>
-                                        <TableCell className="border-r border-white/20">
-                                            <Input
-                                                 type="text" // Use text for validation
-                                                 pattern="[0-9]*\.?[0-9]*"
-                                                 placeholder="Amt"
-                                                 value={wageInputMap[employee.id]?.mealAllowance || ''}
-                                                 onChange={e => handleWageInputChange(employee.id, 'mealAllowance', e.target.value)}
-                                                 className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" // Adjusted width
-                                                 inputMode="decimal"
-                                            />
-                                        </TableCell>
-                                        <TableCell className="border-r border-white/20">
-                                            <Input
-                                                 type="text" // Use text for validation
-                                                 pattern="[0-9]*\.?[0-9]*"
-                                                 placeholder="Amt"
-                                                 value={wageInputMap[employee.id]?.otherDeductions || ''}
-                                                 onChange={e => handleWageInputChange(employee.id, 'otherDeductions', e.target.value)}
-                                                 className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" // Adjusted width
-                                                 inputMode="decimal"
-                                            />
-                                        </TableCell>
-                                        <TableCell className="text-white border-r border-white/20 text-right">
-                                            {displayFNPFDeduct}
-                                        </TableCell>
-                                        <TableCell className="text-white font-medium text-right">
-                                            {displayNetPay}
-                                        </TableCell>
-                                    </TableRow>
-                                );
-                            })}
-                            {/* Total Row */}
-                           <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
-                             <TableCell colSpan={4} className="text-right text-white pr-4">
-                               Totals:
-                             </TableCell>
-                             <TableCell className="text-white border-l border-r border-white/20 text-right"> {/* Total Total Hours */}
-                                {totalTotalHours.toFixed(2)}
-                             </TableCell>
-                             <TableCell className="text-white border-r border-white/20 text-right"> {/* Total Normal Hours */}
-                               {totalHoursWorked.toFixed(2)}
-                             </TableCell>
-                              <TableCell className="text-white border-r border-white/20 text-right"> {/* Total Overtime Hours */}
-                               {totalOvertimeHours.toFixed(2)}
-                              </TableCell>
-                             <TableCell className="text-white border-r border-white/20 text-right">
-                               ${totalMealAllowance.toFixed(2)}
-                             </TableCell>
-                              <TableCell className="text-white border-r border-white/20 text-right">
-                               ${totalOtherDeductions.toFixed(2)}
-                             </TableCell>
-                             <TableCell className="text-white border-r border-white/20 text-right">
-                               ${totalFnpfDeduction.toFixed(2)}
-                             </TableCell>
-                             <TableCell className="text-white text-right">
-                               ${totalNetPay.toFixed(2)}
-                             </TableCell>
-                           </TableRow>
-                        </TableBody>
-                    </Table>
+                {/* Branch Selection */}
+                <div className="grid gap-2">
+                  <Label className="text-white font-semibold">Select Branch</Label>
+                  <RadioGroup
+                      onValueChange={(value) => handleRadioChange('branch', value as 'labasa' | 'suva')}
+                      value={formData.branch}
+                      className="grid grid-cols-2 gap-4"
+                  >
+                      <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="labasa" id="r-branch-labasa" className="border-white text-primary" />
+                      <Label htmlFor="r-branch-labasa" className="text-white cursor-pointer">Labasa Branch</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="suva" id="r-branch-suva" className="border-white text-primary" />
+                      <Label htmlFor="r-branch-suva" className="text-white cursor-pointer">Suva Branch</Label>
+                      </div>
+                  </RadioGroup>
+                </div>
+
+                {/* Employee Name */}
+                <div className="grid gap-2 mt-4">
+                  <Label htmlFor="name" className="text-white">
+                      Employee Name <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                      id="name"
+                      type="text"
+                      placeholder="Enter full name"
+                      value={formData.name}
+                      onChange={handleChange}
+                      required
+                      className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                  />
+                </div>
+
+                {/* Employee Position */}
+                <div className="grid gap-2">
+                  <Label htmlFor="position" className="text-white">
+                      Employee Position <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                      id="position"
+                      type="text"
+                      placeholder="e.g., Sales Assistant"
+                      value={formData.position}
+                      onChange={handleChange}
+                      required
+                      className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                  />
+                </div>
+
+                {/* Hourly Wage */}
+                <div className="grid gap-2">
+                  <Label htmlFor="hourlyWage" className="text-white">
+                      Hourly Wage ($) <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                      id="hourlyWage"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="e.g., 15.50"
+                      value={formData.hourlyWage}
+                      onChange={handleChange}
+                      required
+                      className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                  />
+                </div>
+
+                {/* TIN No */}
+                 <div className="grid gap-2">
+                    <Label htmlFor="tinNo" className="text-white">
+                        TIN No
+                    </Label>
+                    <Input
+                        id="tinNo"
+                        type="text"
+                        placeholder="Enter Tax ID Number (Optional)"
+                        value={formData.tinNo || ''} // Handle null/undefined for display
+                        onChange={handleChange}
+                        className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                    />
+                  </div>
+
+                 {/* FNPF Eligibility */}
+                <div className="flex items-center space-x-2 mt-4">
+                    <Checkbox
+                        id="fnpfEligible"
+                        checked={formData.fnpfEligible}
+                        onCheckedChange={handleCheckboxChange}
+                        className="border-white text-primary"
+                    />
+                    <Label htmlFor="fnpfEligible" className="text-white cursor-pointer">Eligible for FNPF Deduction</Label>
+                </div>
+
+                {/* FNPF No (Conditional) */}
+                {formData.fnpfEligible && (
+                    <div className="grid gap-2 mt-2"> {/* Adjusted margin */}
+                        <Label htmlFor="fnpfNo" className="text-white">
+                            FNPF No <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                            id="fnpfNo"
+                            type="text"
+                            placeholder="Enter FNPF Number"
+                            value={formData.fnpfNo || ''} // Handle null/undefined for display
+                            onChange={handleChange}
+                            required={formData.fnpfEligible}
+                            className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                        />
                     </div>
                 )}
 
-                {/* Action Buttons */}
-                <div className="flex flex-wrap justify-center gap-3 mt-6">
-                  <Button variant="secondary" size="lg" onClick={handleSaveWages} disabled={isSaving} className="min-w-[150px] hover:bg-gray-700/80">
-                    {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save Wages</>}
-                  </Button>
-                  <Button variant="secondary" size="lg" onClick={() => handleExport('BSP')} className="min-w-[150px] hover:bg-gray-700/80">
-                     <FileDown className="mr-2 h-4 w-4" /> Export CSV (BSP)
-                  </Button>
-                  <Button variant="secondary" size="lg" onClick={() => handleExport('BRED')} className="min-w-[150px] hover:bg-gray-700/80">
-                     <FileDown className="mr-2 h-4 w-4" /> Export CSV (BRED)
-                  </Button>
-                   <Button variant="secondary" size="lg" onClick={() => handleExport('Excel')} className="min-w-[150px] hover:bg-gray-700/80">
-                     <FileText className="mr-2 h-4 w-4" /> Export to Excel
-                  </Button>
+                {/* Payment Method */}
+                <div className="grid gap-2 mt-4">
+                  <Label className="text-white font-semibold">Payment Method</Label>
+                  <RadioGroup
+                      onValueChange={(value) => handleRadioChange('paymentMethod', value as 'cash' | 'online')}
+                      value={formData.paymentMethod}
+                      className="grid grid-cols-2 gap-4"
+                  >
+                      <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="cash" id="r-payment-cash" className="border-white text-primary" />
+                      <Label htmlFor="r-payment-cash" className="text-white cursor-pointer">Cash Wages</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="online" id="r-payment-online" className="border-white text-primary" />
+                      <Label htmlFor="r-payment-online" className="text-white cursor-pointer">Online Transfer</Label>
+                      </div>
+                  </RadioGroup>
                 </div>
 
-                {/* Branch/Cash Total Display */}
-                <div className="mt-6 pt-4 border-t border-white/20 text-center space-y-1">
-                  <div className="text-md text-gray-300">
-                    Total Suva Branch Wages: <span className="font-semibold text-white">${totalSuvaWages.toFixed(2)}</span>
-                  </div>
-                  <div className="text-md text-gray-300">
-                    Total Labasa Branch Wages: <span className="font-semibold text-white">${totalLabasaWages.toFixed(2)}</span>
-                  </div>
-                  <div className="text-md text-gray-300">
-                    Total Cash Wages: <span className="font-semibold text-white">${totalCashWages.toFixed(2)}</span>
-                  </div>
-                </div>
+                {/* Bank Details (Conditional) */}
+                {formData.paymentMethod === 'online' && (
+                <>
+                    {/* Bank Code */}
+                    <div className="grid gap-2 mt-4">
+                        <Label htmlFor="bankCode" className="text-white">Bank Code <span className="text-red-500">*</span></Label>
+                        <Select
+                            onValueChange={handleBankCodeChange}
+                            value={formData.bankCode || ''} // Handle null for Select
+                            required={formData.paymentMethod === 'online'}
+                        >
+                            <SelectTrigger className="bg-white/10 text-white placeholder-gray-400 border-white/20">
+                                <SelectValue placeholder="Select Bank Code" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ANZ">ANZ</SelectItem>
+                                <SelectItem value="BSP">BSP</SelectItem>
+                                <SelectItem value="BOB">BOB</SelectItem>
+                                <SelectItem value="HFC">HFC</SelectItem>
+                                <SelectItem value="BRED">BRED</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {/* Bank Account Number */}
+                    <div className="grid gap-2">
+                      <Label htmlFor="bankAccountNumber" className="text-white">
+                          Bank Account Number <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                          id="bankAccountNumber"
+                          type="text"
+                          placeholder="Enter account number"
+                          value={formData.bankAccountNumber || ''} // Handle null
+                          onChange={handleChange}
+                          required={formData.paymentMethod === 'online'}
+                          className="bg-white/10 text-white placeholder-gray-400 border-white/20"
+                      />
+                    </div>
+                </>
+                )}
+
+                {/* Submit Button */}
+                <Button
+                  className="w-full mt-6"
+                  type="submit"
+                  variant="gradient"
+                  disabled={isLoading} // Disable button when loading
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Employee'
+                  )}
+                </Button>
+            </form>
             </CardContent>
-          </Card>
-        </main>
+            </Card>
 
-      </div>
-        {/* Footer is handled by RootLayout */}
-
-       {/* AlertDialog for admin password */}
-        <AlertDialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
-           <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
-               <AlertDialogHeader>
-                   <AlertDialogTitle>Confirm Update</AlertDialogTitle>
-                   <AlertDialogDescription className="text-gray-300">
-                       Wage records already exist for this period. Enter the admin password to overwrite them.
-                   </AlertDialogDescription>
-               </AlertDialogHeader>
-               <div className="grid gap-2">
-                   <Label htmlFor="save-password">Admin Password</Label>
-                   <Input
-                       id="save-password"
-                       type="password"
-                       value={deletePassword}
-                       onChange={(e) => setDeletePassword(e.target.value)}
-                       className="bg-gray-800 border-white/20 text-white"
-                       onKeyPress={(e) => { if (e.key === 'Enter') confirmSaveWithPassword(); }}
-                   />
-               </div>
-               <AlertDialogFooter>
-                   <AlertDialogCancel onClick={() => {setShowPasswordDialog(false); setDeletePassword('');}} className="border-white/20 text-white hover:bg-white/10">Cancel</AlertDialogCancel>
-                   <AlertDialogAction
-                       onClick={confirmSaveWithPassword}
-                       disabled={isSaving}
-                       className="bg-blue-600 hover:bg-blue-700"
-                   >
-                       {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Confirm Update'}
-                   </AlertDialogAction>
-               </AlertDialogFooter>
-           </AlertDialogContent>
-        </AlertDialog>
+        </div>
+          {/* Footer is handled by RootLayout */}
     </div>
   );
 };
 
-export default CreateWagesPage;
+export default CreateEmployeePage;

@@ -61,6 +61,14 @@ export const getEmployees = async (): Promise<Employee[]> => {
     let errorMessage = `Failed to fetch employees. DB Error: ${error.message || 'Unknown database error'}`;
     if (error.message?.includes('relation "employees1" does not exist')) {
         errorMessage = 'Failed to fetch employees. The "employees1" table does not seem to exist in the database. Please check the schema.';
+    } else if (error.code === 'ENOTFOUND' || error.message?.includes('ENOTFOUND')) {
+         errorMessage = `Failed to fetch employees. Could not resolve database host. Check network and DB connection details.`;
+    } else if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+         errorMessage = `Failed to fetch employees. Connection refused. Check if database is running and accessible.`;
+    } else if (error.message?.includes('password authentication failed')) {
+         errorMessage = 'Failed to fetch employees. Database password authentication failed.';
+    } else if (error.message?.includes('Database pool is not available') || error.message?.includes('Database pool failed to initialize')) {
+        errorMessage = 'Failed to fetch employees. Database connection pool is not available. Check server startup logs.';
     }
      // Re-throw the potentially enhanced error message
      throw new Error(errorMessage);
@@ -86,6 +94,8 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
     fnpfEligible,
   } = employeeData;
 
+  console.log('Received employee data for addEmployee:', employeeData); // Log received data
+
   // Basic validation (can be expanded)
   if (!name || !position || !hourlyWage) {
       throw new Error('Missing required employee fields (name, position, hourlyWage).');
@@ -98,11 +108,16 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
    }
 
   // Ensure conditional fields are handled (e.g., FNPF no based on eligibility)
-  const finalFnpfNo = fnpfEligible ? fnpfNo : null;
+  const finalFnpfNo = fnpfEligible ? (fnpfNo?.trim() || null) : null; // Trim and ensure null if empty/ineligible
   const finalBankCode = paymentMethod === 'online' ? bankCode : null;
   const finalBankAccountNumber = paymentMethod === 'online' ? bankAccountNumber : null;
 
+  console.log('Data prepared for DB insert:', {
+      name, position, hourlyWageNumeric, finalFnpfNo, tinNo, finalBankCode, finalBankAccountNumber, paymentMethod, branch, fnpfEligible
+  });
+
   try {
+    console.log('Executing INSERT query...');
     const result = await query(
       `INSERT INTO employees1 (employee_name, position, hourly_wage, fnpf_no, tin_no, bank_code, bank_account_number, payment_method, branch, fnpf_eligible)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -120,32 +135,83 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
         fnpfEligible,
       ]
     );
+    console.log('Query execution finished. Result:', result);
+
     if (result.rows.length === 0) {
+        console.error('Insert query did not return an ID.');
         throw new Error('Failed to create employee, no ID returned.');
     }
     console.log('Employee added successfully with ID:', result.rows[0].id);
     return result.rows[0].id; // Return the newly generated UUID from the DB
   } catch (error: any) {
     console.error('Detailed error adding employee to database:', error);
+    console.error('Error Code:', error.code); // Log specific PG error code if available
+    console.error('Error Constraint:', error.constraint); // Log constraint name if available (e.g., for unique violation)
+
     let errorMessage = `Failed to add employee. DB Error: ${error.message || 'Unknown database error'}`;
-    if (error.message?.includes('relation "employees1" does not exist')) {
-        errorMessage = 'Failed to add employee. The "employees1" table does not seem to exist in the database. Please check the schema.';
+    // Provide more specific user-facing messages based on common errors
+    if (error.code === '23505' && error.constraint === 'employees1_fnpf_no_key') { // Duplicate key (unique constraint violation)
+        errorMessage = `Failed to add employee. The FNPF Number '${finalFnpfNo}' already exists.`;
+    } else if (error.message?.includes('relation "employees1" does not exist')) {
+        errorMessage = 'Failed to add employee. The "employees1" table was not found. Please check the database schema.';
     } else if (error.code === '23502') { // Not null violation
-        errorMessage = `Failed to add employee. A required field is missing or null. Original error: ${error.message}`;
+        errorMessage = `Failed to add employee. A required field is missing or null. Check ${error.column || 'a required column'}.`;
     } else if (error.message?.includes('does not exist') && error.message?.includes('column')) {
-         errorMessage = `Failed to add employee. A column specified in the query does not exist in the 'employees1' table. Check column names. Original error: ${error.message}`;
+         errorMessage = `Failed to add employee. A column specified in the query does not exist in the 'employees1' table. Check column names.`;
     } else if (error.message?.includes('password authentication failed')) {
-        errorMessage = 'Failed to add employee. Database password authentication failed. Check PGPASSWORD.';
-    } else if (error.message?.includes('Database pool is not initialized')) {
+        errorMessage = 'Failed to add employee. Database password authentication failed.';
+    } else if (error.message?.includes('Database pool is not available') || error.message?.includes('Database pool failed to initialize')) {
        errorMessage = 'Failed to add employee. Database connection is not available. Check server logs for initialization errors.';
-    } else if (error.message?.includes('Database connection is not available')) {
-        errorMessage = error.message; // Use the specific message from the query function
-    } else if (error.message?.includes('relation "employees" does not exist')) {
-        errorMessage = 'Failed to add employee. The "employees" table was not found. Please check if the table name is correct (e.g., employees1).';
+    } else if (error.code === 'ENOTFOUND' || error.message?.includes('ENOTFOUND')) {
+         errorMessage = `Failed to add employee. Could not resolve database host. Check network and DB connection details.`;
+    } else if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+         errorMessage = `Failed to add employee. Connection refused. Check if database is running and accessible.`;
     }
+    // Keep the original error message for other unknown DB errors
     throw new Error(errorMessage);
   }
 };
+
+/**
+ * Checks if an employee with the given FNPF number already exists.
+ * @param {string | null} fnpfNo - The FNPF number to check.
+ * @returns {Promise<Employee | null>} Employee object (id) if exists, null otherwise.
+ */
+export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: string } | null> => {
+    // If FNPF is not eligible or number is empty/null, no need to check
+    if (!fnpfNo || fnpfNo.trim() === '') {
+        console.log("Skipping FNPF check: No FNPF number provided.");
+        return null;
+    }
+
+    const trimmedFnpfNo = fnpfNo.trim();
+    console.log(`Executing query to check for existing FNPF No: ${trimmedFnpfNo}`);
+
+    try {
+        const result = await query(
+            `SELECT id FROM employees1 WHERE fnpf_no = $1 LIMIT 1;`,
+            [trimmedFnpfNo]
+        );
+        console.log(`FNPF check query result: ${result.rowCount} rows found.`);
+
+        if (result.rows.length > 0) {
+            console.log(`FNPF number ${trimmedFnpfNo} found for employee ID: ${result.rows[0].id}`);
+            return { id: result.rows[0].id }; // Return an object indicating existence
+        } else {
+            console.log(`FNPF number ${trimmedFnpfNo} is unique.`);
+            return null; // FNPF number does not exist
+        }
+    } catch (error: any) {
+        console.error("Error checking existing FNPF number:", error);
+        // Don't throw here, let the main addEmployee handle DB errors,
+        // but log it for debugging. Maybe return an error indicator if needed.
+        // For now, treat check failure as "doesn't exist" to avoid blocking unnecessarily,
+        // but the INSERT will fail later if there's a real duplicate.
+        // A more robust approach might involve specific error handling here.
+        return null; // Or throw new Error("Failed to check existing FNPF number.");
+    }
+};
+
 
 /**
  * Updates an existing employee's information in the PostgreSQL database.
@@ -180,7 +246,7 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<void> =
    }
 
    // Ensure conditional fields are handled
-   const finalFnpfNo = fnpfEligible ? fnpfNo : null;
+   const finalFnpfNo = fnpfEligible ? (fnpfNo?.trim() || null) : null; // Trim and ensure null
    const finalBankCode = paymentMethod === 'online' ? bankCode : null;
    const finalBankAccountNumber = paymentMethod === 'online' ? bankAccountNumber : null;
 
@@ -222,8 +288,13 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<void> =
     console.log(`Employee with ID ${id} updated successfully.`);
   } catch (error: any) {
     console.error(`Detailed error updating employee with ID ${id}:`, error);
-    // Re-throw the original error from the query function
-    throw error;
+    // Check for specific errors like duplicate FNPF number during update
+    let errorMessage = `Failed to update employee. DB Error: ${error.message || 'Unknown database error'}`;
+     if (error.code === '23505' && error.constraint === 'employees1_fnpf_no_key') {
+        errorMessage = `Failed to update employee. The FNPF Number '${finalFnpfNo}' already exists for another employee.`;
+    }
+    // Re-throw the potentially enhanced error message
+    throw new Error(errorMessage);
   }
 };
 
@@ -430,14 +501,14 @@ export const getWageRecords = async (filterDateFrom: Date | null = null, filterD
   const queryParams = [];
 
   // IMPORTANT: Ensure date parameters are correctly formatted for the query if provided
-  if (filterDateFrom && filterDateTo) {
+  if (filterDateFrom && filterDateTo && format(filterDateFrom, 'yyyy-MM-dd') && format(filterDateTo, 'yyyy-MM-dd')) {
     queryString += ' WHERE date_from >= $1::date AND date_to <= $2::date';
     queryParams.push(format(filterDateFrom, 'yyyy-MM-dd')); // Format as YYYY-MM-DD string
     queryParams.push(format(filterDateTo, 'yyyy-MM-dd'));   // Format as YYYY-MM-DD string
-  } else if (filterDateFrom) {
+  } else if (filterDateFrom && format(filterDateFrom, 'yyyy-MM-dd')) {
     queryString += ' WHERE date_from >= $1::date';
     queryParams.push(format(filterDateFrom, 'yyyy-MM-dd'));
-  } else if (filterDateTo) {
+  } else if (filterDateTo && format(filterDateTo, 'yyyy-MM-dd')) {
      queryString += ' WHERE date_to <= $1::date';
      queryParams.push(format(filterDateTo, 'yyyy-MM-dd'));
   }
@@ -496,7 +567,7 @@ export const deleteWageRecordsByPeriod = async (dateFrom: string, dateTo: string
  * @returns {Promise<boolean>} True if records exist, false otherwise.
  */
 export const checkWageRecordsExist = async (dateFrom: Date, dateTo: Date): Promise<boolean> => {
-    if (!dateFrom || !dateTo || !isValid(dateFrom) || !isValid(dateTo)) {
+    if (!dateFrom || !dateTo || !format(dateFrom, 'yyyy-MM-dd') || !format(dateTo, 'yyyy-MM-dd')) {
         console.error("Invalid date range provided to checkWageRecordsExist");
         return false; // Or throw an error
     }
