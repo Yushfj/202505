@@ -19,7 +19,7 @@ import {cn} from '@/lib/utils';
 import {format, isValid, parseISO} from 'date-fns'; // Added parseISO and isValid
 import {CalendarIcon, Home, ArrowLeft, Power, Trash2, FileText, FileDown, Loader2} from 'lucide-react'; // Added Loader2
 import {DateRange} from 'react-day-picker';
-import {useToast} from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast import
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import {
@@ -92,7 +92,7 @@ const WagesRecordsPage = () => {
   const [selectedPayPeriodKey, setSelectedPayPeriodKey] = useState<string | null>(null); // Key of the selected period for details view
   const [deletePassword, setDeletePassword] = useState('');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false); // Control delete dialog visibility
-  const {toast} = useToast();
+  const {toast} = useToast(); // Initialize useToast
   const router = useRouter();
   const ADMIN_PASSWORD = 'admin01'; // Store securely in real app
 
@@ -110,13 +110,13 @@ const WagesRecordsPage = () => {
 
     } catch (error: any) {
       console.error("Error fetching initial data:", error);
-      toast({ title: "Error", description: error.message || "Failed to load initial data.", variant: "destructive" });
+      toast({ title: "Error", description: error.message || "Failed to load initial data.", variant: "destructive" }); // Use toast for error
       setEmployees([]);
       setAllWageRecords([]);
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast]); // Add toast to dependencies
 
   useEffect(() => {
     fetchInitialData();
@@ -136,12 +136,12 @@ const WagesRecordsPage = () => {
            setAllWageRecords(filteredRecords); // Update state with filtered records
        } catch (error: any) {
             console.error("Error fetching filtered wage records:", error);
-            toast({ title: "Error", description: error.message || "Failed to load filtered records.", variant: "destructive" });
+            toast({ title: "Error", description: error.message || "Failed to load filtered records.", variant: "destructive" }); // Use toast for error
             setAllWageRecords([]); // Clear records on error
        } finally {
             setIsLoading(false);
        }
-   }, [dateRange, toast, fetchInitialData]); // Add fetchInitialData to deps
+   }, [dateRange, fetchInitialData, toast]); // Add fetchInitialData and toast to deps
 
     // Effect to trigger fetching when dateRange changes
     useEffect(() => {
@@ -227,13 +227,15 @@ const WagesRecordsPage = () => {
   // Handle deletion confirmed via dialog
   const handleDeleteRecords = async () => {
     if (!selectedPayPeriodKey) {
-      toast({ title: 'Error', description: 'No pay period selected for deletion.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'No pay period selected for deletion.', variant: 'destructive' }); // Use toast for error
+      console.error('No pay period selected for deletion.'); // Log error
       setShowDeleteDialog(false);
       return;
     }
 
     if (deletePassword !== ADMIN_PASSWORD) {
-      toast({ title: 'Error', description: 'Incorrect password.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Incorrect password.', variant: 'destructive' }); // Use toast for error
+      console.error('Incorrect password.'); // Log error
       // Don't clear password here, let user retry
       return;
     }
@@ -242,7 +244,8 @@ const WagesRecordsPage = () => {
 
     const selectedGroup = groupedWageRecords.find(group => group.payPeriodKey === selectedPayPeriodKey);
     if (!selectedGroup) {
-        toast({ title: 'Error', description: 'Selected pay period not found.', variant: 'destructive' });
+        toast({ title: 'Error', description: 'Selected pay period not found.', variant: 'destructive' }); // Use toast for error
+        console.error('Selected pay period not found.'); // Log error
         setIsDeleting(false);
         setShowDeleteDialog(false);
         return;
@@ -261,11 +264,12 @@ const WagesRecordsPage = () => {
         await fetchFilteredRecords(); // Refetch based on current date filter
 
         setSelectedPayPeriodKey(null); // Deselect the period after deletion
-        toast({ title: 'Success', description: 'Wage records deleted successfully!' });
+        toast({ title: 'Success', description: 'Wage records deleted successfully!' }); // Use toast for success
+        console.log('Wage records deleted successfully!'); // Log success
 
     } catch (error: any) {
         console.error("Error deleting records from database:", error);
-        toast({ title: 'Error', description: error.message || 'Failed to delete wage records.', variant: 'destructive' });
+        toast({ title: 'Error', description: error.message || 'Failed to delete wage records.', variant: 'destructive' }); // Use toast for error
     } finally {
         setIsDeleting(false); // Finish deletion process
         setShowDeleteDialog(false); // Close dialog
@@ -276,20 +280,23 @@ const WagesRecordsPage = () => {
   // --- Export Functions ---
   const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
     if (!selectedPayPeriodKey) {
-      toast({ title: 'Error', description: 'Please select a pay period to export.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Please select a pay period to export.', variant: 'destructive' }); // Use toast for error
+      console.error('Please select a pay period to export.'); // Log error
       return;
     }
 
     const recordsToExport = selectedPeriodRecords; // Use already filtered records for the selected period
 
     if (recordsToExport.length === 0) {
-      toast({ title: 'Info', description: 'No records to export for this period.', variant: 'default' });
+      toast({ title: 'Info', description: 'No records to export for this period.', variant: 'default' }); // Use toast for info
+      console.log('No records to export for this period.'); // Log info
       return;
     }
 
     const selectedGroup = groupedWageRecords.find(g => g.payPeriodKey === selectedPayPeriodKey);
      if (!selectedGroup) {
-         toast({ title: 'Error', description: 'Could not find selected period details.', variant: 'destructive' });
+         toast({ title: 'Error', description: 'Could not find selected period details.', variant: 'destructive' }); // Use toast for error
+         console.error('Could not find selected period details.'); // Log error
          return;
      }
     const dateFromStr = format(selectedGroup.dateFrom, 'yyyyMMdd');
@@ -304,7 +311,8 @@ const WagesRecordsPage = () => {
         });
 
         if (onlineTransferRecords.length === 0) {
-            toast({ title: 'Info', description: `No online transfer employees found for this period.`, variant: 'default' });
+            toast({ title: 'Info', description: `No online transfer employees found for this period.`, variant: 'default' }); // Use toast for info
+            console.log(`No online transfer employees found for this period.`); // Log info
             return;
         }
 
@@ -351,7 +359,8 @@ const WagesRecordsPage = () => {
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
+        toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` }); // Use toast for success
+        console.log(`Wage records exported to CSV (${formatType}) successfully!`); // Log success
 
     } else if (formatType === 'Excel') {
         const excelData = [
@@ -391,7 +400,8 @@ const WagesRecordsPage = () => {
         ];
         XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
         XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
-        toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' });
+        toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' }); // Use toast for success
+        console.log('Wage records exported to Excel successfully!'); // Log success
     }
   };
 

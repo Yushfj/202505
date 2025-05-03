@@ -1,4 +1,3 @@
-
 'use client';
 
 import {useState, useEffect, useCallback} from 'react';
@@ -8,7 +7,7 @@ import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import Image from 'next/image';
 import {Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue} from '@/components/ui/select';
-import {useToast} from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast import
 import {useRouter} from 'next/navigation';
 import {RadioGroup, RadioGroupItem} from '@/components/ui/radio-group';
 import { Checkbox } from "@/components/ui/checkbox"
@@ -51,7 +50,7 @@ const ChangeEmployeeInfoPage = () => {
   const [isUpdating, setIsUpdating] = useState(false); // State for update process
   const [showPasswordDialog, setShowPasswordDialog] = useState(false); // State for password dialog
   const [updatePassword, setUpdatePassword] = useState(''); // State for password input
-  const {toast} = useToast();
+  const {toast} = useToast(); // Initialize useToast
   const router = useRouter();
   const ADMIN_PASSWORD = 'admin01'; // Store securely in a real application
 
@@ -62,16 +61,17 @@ const ChangeEmployeeInfoPage = () => {
         const fetchedEmployees = await getEmployees();
         setAllEmployees(fetchedEmployees);
     } catch (error: any) {
-        toast({
+        toast({ // Use toast for error
             title: 'Error Fetching Employees',
             description: error.message || 'Failed to load employee list.',
             variant: 'destructive',
         });
+        console.error('Error Fetching Employees:', error.message || 'Failed to load employee list.'); // Log error
         setAllEmployees([]);
     } finally {
         setIsLoadingEmployees(false);
     }
-  }, [toast]);
+  }, [toast]); // Add toast to dependencies
 
   useEffect(() => {
       fetchAllEmployees();
@@ -94,20 +94,22 @@ const ChangeEmployeeInfoPage = () => {
                 bankAccountNumber: foundEmployee.bankAccountNumber || '',
             });
         } else {
-            toast({ title: 'Error', description: 'Selected employee not found.', variant: 'destructive' });
+            toast({ title: 'Error', description: 'Selected employee not found.', variant: 'destructive' }); // Use toast for error
+            console.error('Selected employee not found.'); // Log error
             setSelectedEmployeeId(null); // Reset selection if not found
         }
     } catch (error: any) {
-        toast({
+        toast({ // Use toast for error
             title: 'Error Fetching Details',
             description: error.message || 'Failed to load employee details.',
             variant: 'destructive',
         });
+        console.error('Error Fetching Details:', error.message || 'Failed to load employee details.'); // Log error
          setSelectedEmployeeId(null); // Reset selection on error
     } finally {
         setIsLoadingDetails(false);
     }
-  }, [toast]);
+  }, [toast]); // Add toast to dependencies
 
   // Handle employee selection change
   const handleEmployeeSelect = (employeeId: string) => {
@@ -172,11 +174,12 @@ const ChangeEmployeeInfoPage = () => {
       }
 
       if (errors.length > 0) {
-        toast({
+        toast({ // Use toast for validation errors
           title: 'Validation Error',
           description: errors.join(' '),
           variant: 'destructive',
         });
+        console.error('Validation Error:', errors.join(' ')); // Log error
         isValid = false;
       }
 
@@ -198,11 +201,12 @@ const ChangeEmployeeInfoPage = () => {
   // Function called when password confirmation is submitted
   const confirmUpdate = async () => {
     if (updatePassword !== ADMIN_PASSWORD) {
-        toast({
+        toast({ // Use toast for incorrect password
             title: 'Error',
             description: 'Incorrect admin password.',
             variant: 'destructive',
         });
+        console.error('Incorrect admin password.'); // Log error
         // Optionally clear password field here or keep it for retry
         // setUpdatePassword('');
         return; // Stop the update process
@@ -230,10 +234,11 @@ const ChangeEmployeeInfoPage = () => {
       // Call the service function to update the employee in the database
       await updateEmployee(updatedEmployeeData);
 
-      toast({
+      toast({ // Use toast for success message
         title: 'Success',
         description: 'Employee information updated successfully!',
       });
+      console.log('Employee information updated successfully!'); // Log success
 
       // Optionally reset selection and form
       setSelectedEmployeeId(null);
@@ -242,11 +247,12 @@ const ChangeEmployeeInfoPage = () => {
       // router.push('/employees/information'); // Optional: navigate back
 
     } catch (error: any) {
-      toast({
+      toast({ // Use toast for update error
         title: 'Error Updating Employee',
         description: error.message || 'Failed to update employee information.',
         variant: 'destructive',
       });
+      console.error('Error Updating Employee:', error.message || 'Failed to update employee information.'); // Log error
     } finally {
       setIsUpdating(false); // Indicate update process finished
     }
@@ -410,7 +416,7 @@ const ChangeEmployeeInfoPage = () => {
                         step="0.01"
                         min="0"
                         placeholder="e.g., 15.50"
-                        value={employee.hourlyWage} // Already string from state setup
+                        value={employee.hourlyWage || ""} // Provide default value
                         onChange={handleChange}
                         required
                         className="bg-white/10 text-white placeholder-gray-400 border-white/20"

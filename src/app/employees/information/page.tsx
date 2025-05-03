@@ -1,4 +1,3 @@
-
 'use client';
 
 import Image from 'next/image';
@@ -6,7 +5,7 @@ import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {useEffect, useState, useCallback} from 'react'; // Added useCallback
 import {Trash2, Edit, Home, ArrowLeft, Loader2} from 'lucide-react'; // Added Loader2
 import {Button} from '@/components/ui/button';
-import {useToast} from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast import
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +42,7 @@ const EmployeeInformationPage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(true); // Loading state
   const [isDeleting, setIsDeleting] = useState(false); // Deleting state
-  const {toast} = useToast();
+  const {toast} = useToast(); // Initialize useToast
   const [deletePassword, setDeletePassword] = useState('');
   const [employeeToDelete, setEmployeeToDelete] = useState<string | null>(null); // Store ID of employee to delete
   const ADMIN_PASSWORD = 'admin01'; // Store this securely in a real application
@@ -58,7 +57,7 @@ const EmployeeInformationPage = () => {
         setEmployees(fetchedEmployees);
       } catch (error: any) {
         console.error("Error fetching employees:", error);
-        toast({
+        toast({ // Use toast for error
           title: 'Error',
           description: error.message || 'Failed to load employee data.',
           variant: 'destructive',
@@ -67,7 +66,7 @@ const EmployeeInformationPage = () => {
       } finally {
         setIsLoading(false); // Stop loading
       }
-    }, [toast]); // Dependency array includes toast
+    }, [toast]); // Add toast to dependencies
 
   // Fetch employees on initial mount and when fetchAndSetEmployees changes (which it won't unless dependencies change)
   useEffect(() => {
@@ -80,11 +79,12 @@ const EmployeeInformationPage = () => {
     if (isDeleting) return; // Prevent multiple delete calls
 
     if (deletePassword !== ADMIN_PASSWORD) {
-      toast({
+      toast({ // Use toast for incorrect password
         title: 'Error',
         description: 'Incorrect password. Please try again.',
         variant: 'destructive',
       });
+      console.error('Incorrect password. Please try again.'); // Log error
       setDeletePassword(''); // Clear password input
       return;
     }
@@ -97,16 +97,17 @@ const EmployeeInformationPage = () => {
       // Re-fetch employees from the database to update the UI
       await fetchAndSetEmployees(); // Refresh the list
 
-      toast({
+      toast({ // Use toast for success
         title: 'Success',
         description: 'Employee deleted successfully!',
       });
+      console.log('Employee deleted successfully!'); // Log success
        // Close the dialog manually after successful deletion
        setShowDeleteDialog(false); // Use state to control dialog
 
     } catch (error: any) {
       console.error('Error deleting employee:', error);
-      toast({
+      toast({ // Use toast for deletion error
         title: 'Error',
         description: error.message || 'Failed to delete employee.',
         variant: 'destructive',
@@ -423,4 +424,5 @@ const EmployeeInformationPage = () => {
 };
 
 export default EmployeeInformationPage;
+
 

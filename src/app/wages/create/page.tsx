@@ -3,7 +3,7 @@
 import {useState, useEffect, useMemo, useCallback} from 'react';
 import Image from 'next/image';
 import Link from "next/link";
-import {useToast} from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast
 import {
   Table,
   TableBody,
@@ -52,9 +52,9 @@ interface Employee {
   position: string;
   hourlyWage: string; // Still string from DB initially
   fnpfNo: string | null;
-  tinNo: string | null;
-  bankCode: string | null;
-  bankAccountNumber: string | null;
+  tinNo: string | null; // Allow null
+  bankCode: string | null; // Allow null
+  bankAccountNumber: string | null; // Allow null
   paymentMethod: 'cash' | 'online';
   branch: 'labasa' | 'suva';
   fnpfEligible: boolean;
@@ -116,7 +116,7 @@ const CreateWagesPage = () => {
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true); // Loading state for employees
   const [isSaving, setIsSaving] = useState(false); // Saving state for buttons
-  const {toast} = useToast();
+  const {toast} = useToast(); // Initialize useToast
   const [deletePassword, setDeletePassword] = useState('');
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const ADMIN_PASSWORD = 'admin01'; // Store securely in a real application
@@ -155,7 +155,7 @@ const CreateWagesPage = () => {
       }
     } catch (error: any) {
       console.error("Error fetching employees:", error);
-      toast({
+      toast({ // Use toast for error
         title: 'Error Loading Employees',
         description: error.message || 'Failed to load employee data.',
         variant: 'destructive',
@@ -165,7 +165,7 @@ const CreateWagesPage = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]); // Dependency array includes toast
+  }, [toast]); // Add toast to dependencies
 
   useEffect(() => {
     fetchEmployeesCallback();
@@ -336,7 +336,8 @@ const CreateWagesPage = () => {
   // --- Helper Functions ---
   const getCurrentWageRecordsForDb = (): WageRecord[] => {
     if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-      toast({ title: 'Error', description: 'Valid date range missing.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Valid date range missing.', variant: 'destructive' }); // Use toast for error
+      console.error('Valid date range missing.'); // Log error
       return [];
     }
     const records: WageRecord[] = [];
@@ -380,13 +381,15 @@ const CreateWagesPage = () => {
   // --- Event Handlers (Save, Export) ---
   const handleSaveWages = async () => {
        if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-         toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' });
+         toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' }); // Use toast for error
+         console.error('Please select a valid date range.'); // Log error
          return;
        }
 
        const recordsToSave = getCurrentWageRecordsForDb();
        if (recordsToSave.length === 0) {
-         toast({ title: 'Info', description: 'No valid wage data calculated to save.', variant: 'default' });
+         toast({ title: 'Info', description: 'No valid wage data calculated to save.', variant: 'default' }); // Use toast for info
+         console.log('No valid wage data calculated to save.'); // Log info
          return;
        }
 
@@ -401,12 +404,14 @@ const CreateWagesPage = () => {
            } else {
                // If no records exist, save directly
                await saveWageRecords(recordsToSave);
-               toast({ title: 'Success', description: 'Wages calculated and recorded successfully!' });
+               toast({ title: 'Success', description: 'Wages calculated and recorded successfully!' }); // Use toast for success
+               console.log('Wages calculated and recorded successfully!'); // Log success
                resetForm(); // Clear form after successful save
            }
        } catch (error: any) {
            console.error('Error during save process:', error);
-           toast({ title: 'Save Error', description: error.message || 'Failed to check or save wage records.', variant: 'destructive' });
+           toast({ title: 'Save Error', description: error.message || 'Failed to check or save wage records.', variant: 'destructive' }); // Use toast for error
+           console.error('Save Error:', error.message || 'Failed to check or save wage records.');
        } finally {
            setIsSaving(false);
        }
@@ -415,7 +420,8 @@ const CreateWagesPage = () => {
    // Function called when password confirmation is submitted for saving/overwriting
    const confirmSaveWithPassword = async () => {
        if (deletePassword !== ADMIN_PASSWORD) {
-           toast({ title: 'Error', description: 'Incorrect admin password.', variant: 'destructive' });
+           toast({ title: 'Error', description: 'Incorrect admin password.', variant: 'destructive' }); // Use toast for error
+           console.error('Incorrect admin password.'); // Log error
            return; // Stop the process
        }
 
@@ -425,7 +431,8 @@ const CreateWagesPage = () => {
 
        const recordsToSave = getCurrentWageRecordsForDb();
        if (recordsToSave.length === 0) {
-           toast({ title: 'Info', description: 'No valid wage data to save.', variant: 'default' });
+           toast({ title: 'Info', description: 'No valid wage data to save.', variant: 'default' }); // Use toast for info
+           console.log('No valid wage data to save.'); // Log info
            return;
        }
 
@@ -433,11 +440,13 @@ const CreateWagesPage = () => {
        try {
            // Call the service function to save/overwrite records in DB
            await saveWageRecords(recordsToSave); // This will handle deleting existing records first.
-           toast({ title: 'Success', description: 'Wages updated successfully!' });
+           toast({ title: 'Success', description: 'Wages updated successfully!' }); // Use toast for success
+           console.log('Wages updated successfully!'); // Log success
            resetForm(); // Clear form after successful update
        } catch (error: any) {
            console.error('Error updating wage records:', error);
-           toast({ title: 'Update Error', description: error.message || 'Failed to update wage records.', variant: 'destructive' });
+           toast({ title: 'Update Error', description: error.message || 'Failed to update wage records.', variant: 'destructive' }); // Use toast for error
+            console.error('Update Error:', error.message || 'Failed to update wage records.');
        } finally {
            setIsSaving(false);
        }
@@ -447,7 +456,8 @@ const CreateWagesPage = () => {
     // Function to handle exporting data (CSV or Excel)
     const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
         if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-            toast({ title: 'Error', description: 'Please select a valid date range before exporting.', variant: 'destructive' });
+            toast({ title: 'Error', description: 'Please select a valid date range before exporting.', variant: 'destructive' }); // Use toast for error
+            console.error('Please select a valid date range before exporting.'); // Log error
             return;
         }
 
@@ -456,7 +466,8 @@ const CreateWagesPage = () => {
             .filter(Boolean) as CalculatedWageInfo[]; // Filter out potential undefined values
 
         if (recordsToExport.length === 0) {
-            toast({ title: 'Error', description: 'No valid wage records calculated to export.', variant: 'destructive' });
+            toast({ title: 'Error', description: 'No valid wage records calculated to export.', variant: 'destructive' }); // Use toast for error
+            console.error('No valid wage records calculated to export.'); // Log error
             return;
         }
 
@@ -467,7 +478,8 @@ const CreateWagesPage = () => {
              const onlineTransferRecords = recordsToExport.filter(record => record.paymentMethod === 'online');
 
             if (onlineTransferRecords.length === 0) {
-                toast({ title: 'Info', description: `No online transfer employees for ${formatType} export.`, variant: 'default' });
+                toast({ title: 'Info', description: `No online transfer employees for ${formatType} export.`, variant: 'default' }); // Use toast for info
+                console.log(`No online transfer employees for ${formatType} export.`); // Log info
                 return;
             }
 
@@ -512,7 +524,8 @@ const CreateWagesPage = () => {
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
-            toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
+            toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` }); // Use toast for success
+            console.log(`Wage records exported to CSV (${formatType}) successfully!`); // Log success
 
         } else if (formatType === 'Excel') {
             const excelData = [
@@ -565,7 +578,8 @@ const CreateWagesPage = () => {
             ];
             XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
             XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
-            toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' });
+            toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' }); // Use toast for success
+            console.log('Wage records exported to Excel successfully!'); // Log success
         }
     };
 
@@ -690,7 +704,7 @@ const CreateWagesPage = () => {
                                 const displayOvertimeHours = wageInputMap[employee.id]?.overtimeHours || '0.00';
 
                                 return (
-                                    <TableRow key={employee.id}>
+                                    <TableRow key={employee.id} className="hover:bg-white/10">
                                         <TableCell className="text-white border-r border-white/20">{employee.name}</TableCell>
                                         <TableCell className="text-white border-r border-white/20">{displayBankCode}</TableCell>
                                         <TableCell className="text-white border-r border-white/20">{displayAccountNum}</TableCell>
@@ -780,16 +794,35 @@ const CreateWagesPage = () => {
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap justify-center gap-3 mt-6">
-                  <Button variant="secondary" size="lg" onClick={handleSaveWages} disabled={isSaving} className="min-w-[150px] hover:bg-gray-700/80">
+                  <Button
+                      variant="secondary" size="lg" onClick={handleSaveWages}
+                      disabled={isSaving || !dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)}
+                      className="min-w-[150px] hover:bg-gray-700/80"
+                   >
                     {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save Wages</>}
                   </Button>
-                  <Button variant="secondary" size="lg" onClick={() => handleExport('BSP')} className="min-w-[150px] hover:bg-gray-700/80">
+                  <Button
+                     variant="secondary"
+                     size="lg"
+                     onClick={() => handleExport('BSP')}
+                     disabled={!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)} // Disable if no valid date range
+                     className="min-w-[150px] hover:bg-gray-700/80">
                      <FileDown className="mr-2 h-4 w-4" /> Export CSV (BSP)
                   </Button>
-                  <Button variant="secondary" size="lg" onClick={() => handleExport('BRED')} className="min-w-[150px] hover:bg-gray-700/80">
+                  <Button
+                     variant="secondary"
+                     size="lg"
+                     onClick={() => handleExport('BRED')}
+                     disabled={!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)} // Disable if no valid date range
+                     className="min-w-[150px] hover:bg-gray-700/80">
                      <FileDown className="mr-2 h-4 w-4" /> Export CSV (BRED)
                   </Button>
-                   <Button variant="secondary" size="lg" onClick={() => handleExport('Excel')} className="min-w-[150px] hover:bg-gray-700/80">
+                   <Button
+                     variant="secondary"
+                     size="lg"
+                     onClick={() => handleExport('Excel')}
+                     disabled={!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)} // Disable if no valid date range
+                     className="min-w-[150px] hover:bg-gray-700/80">
                      <FileText className="mr-2 h-4 w-4" /> Export to Excel
                   </Button>
                 </div>

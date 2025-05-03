@@ -1,249 +1,255 @@
-"use client";
+'use client';
 
-import Image from "next/image";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import Image from 'next/image';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { Power } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+    ResponsiveContainer,
     LineChart,
     Line,
     XAxis,
     YAxis,
     CartesianGrid,
     Tooltip,
-    ResponsiveContainer,
+    Legend,
 } from 'recharts';
-import { useEffect, useState } from 'react';
-import { Power } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"; // Import Card components
+import { format, parseISO, isValid } from 'date-fns';
+import { getWageRecords } from '@/services/employee-service'; // Import service to fetch wage records
 
+// Interface for wage records fetched from the database
 interface WageRecord {
-    employeeId: string;
-    employeeName: string;
-    hourlyWage: number;
-    hoursWorked: number;
-    mealAllowance: number; // Added meal allowance
-    fnpfDeduction: number;
-    otherDeductions: number;
-    grossPay: number;
-    netPay: number;
-    dateFrom: Date;
-    dateTo: Date;
+  id?: string; // DB record ID
+  employeeId: string;
+  employeeName: string;
+  hourlyWage: number;
+  totalHours: number; // Added total hours
+  hoursWorked: number;
+  overtimeHours: number;
+  mealAllowance: number;
+  fnpfDeduction: number;
+  otherDeductions: number;
+  grossPay: number;
+  netPay: number;
+  dateFrom: string; // Stored as YYYY-MM-DD string from DB
+  dateTo: string;
+  created_at?: Date; // Optional timestamp from DB
 }
 
+// Interface for data points in the chart
+interface ChartDataPoint {
+  payPeriod: string; // e.g., "Jan 01 - Jan 07, 2024"
+  totalNetPay: number;
+}
+
+
 const DashboardPage = () => {
-    const [wageRecords, setWageRecords] = useState<WageRecord[]>([]);
-    const router = useRouter();
+  const [wageRecords, setWageRecords] = useState<WageRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
 
-    useEffect(() => {
-        // Load wage records from local storage
-        const storedWageRecords = localStorage.getItem('wageRecords');
-        if (storedWageRecords) {
-            try {
-                const parsedRecords = JSON.parse(storedWageRecords);
-                // Ensure data integrity before setting state
-                if (Array.isArray(parsedRecords)) {
-                    setWageRecords(
-                        parsedRecords.map((record: any) => {
-                            // Safely create Date objects, return null for invalid dates
-                            const dateFrom = record.dateFrom ? new Date(record.dateFrom) : null;
-                            const dateTo = record.dateTo ? new Date(record.dateTo) : null;
+  // Fetch wage records
+  const fetchWages = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const records = await getWageRecords(); // Fetch all records
+      setWageRecords(records);
+    } catch (error) {
+      console.error("Error fetching wage records for dashboard:", error);
+      // Handle error appropriately, maybe show a message
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-                            if (!dateFrom || isNaN(dateFrom.getTime()) || !dateTo || isNaN(dateTo.getTime())) {
-                                console.warn("Skipping record with invalid date during dashboard load:", record);
-                                return null; // Skip records with invalid dates
-                            }
+  useEffect(() => {
+    fetchWages();
+  }, [fetchWages]);
 
-                            return {
-                                ...record,
-                                dateFrom,
-                                dateTo,
-                                // Ensure numeric types are numbers, default to 0 if invalid
-                                hourlyWage: Number(record.hourlyWage) || 0,
-                                hoursWorked: Number(record.hoursWorked) || 0,
-                                mealAllowance: Number(record.mealAllowance) || 0, // Add meal allowance
-                                fnpfDeduction: Number(record.fnpfDeduction) || 0,
-                                otherDeductions: Number(record.otherDeductions) || 0,
-                                grossPay: Number(record.grossPay) || 0,
-                                netPay: Number(record.netPay) || 0,
-                            };
-                        }).filter((record: WageRecord | null): record is WageRecord => record !== null) // Filter out null records
-                    );
-                } else {
-                    console.error("Stored wage records are not an array:", parsedRecords);
-                    localStorage.removeItem('wageRecords'); // Clear invalid data
-                }
-            } catch (error) {
-                console.error("Error parsing wage records from local storage:", error);
-                localStorage.removeItem('wageRecords'); // Clear invalid data
-            }
-        }
-    }, []);
+  // Process data for the chart
+  const chartData = useMemo(() => {
+    const groupedByPeriod: { [key: string]: number } = {};
 
-    // Group wage records by pay period
-    const payPeriodData = wageRecords.reduce((acc: { [key: string]: { payWeek: string; totalNetPay: number } }, record) => {
-        // Dates are already validated in the useEffect hook
-        const dateFromStr = record.dateFrom.toLocaleDateString();
-        const dateToStr = record.dateTo.toLocaleDateString();
+    wageRecords.forEach(record => {
+      // Ensure date strings are valid before parsing
+      const validDateFromStr = /^\d{4}-\d{2}-\d{2}$/.test(record.dateFrom) ? record.dateFrom : null;
+      const validDateToStr = /^\d{4}-\d{2}-\d{2}$/.test(record.dateTo) ? record.dateTo : null;
 
-        const payWeek = `${dateFromStr} - ${dateToStr}`;
+      if (!validDateFromStr || !validDateToStr) {
+        console.warn("Skipping record with invalid date string format:", record);
+        return; // Skip this record
+      }
 
-        if (!acc[payWeek]) {
-            acc[payWeek] = {
-                payWeek: payWeek,
-                totalNetPay: 0,
-            };
-        }
-        // Ensure netPay is a number before adding
-        acc[payWeek].totalNetPay += (typeof record.netPay === 'number' ? record.netPay : 0);
-        return acc;
-    }, {});
+       // Add time part for correct ISO parsing, assuming start of day
+      const dateFrom = parseISO(validDateFromStr + 'T00:00:00');
+      const dateTo = parseISO(validDateToStr + 'T00:00:00');
 
-    // Convert grouped data into an array for Recharts, sorting by start date
-    const chartData = Object.values(payPeriodData).sort((a, b) => {
-        try {
-            const dateA = new Date(a.payWeek.split(' - ')[0]);
-            const dateB = new Date(b.payWeek.split(' - ')[0]);
-            // Check if dates are valid before comparing
-            if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
-                return dateA.getTime() - dateB.getTime();
-            }
-        } catch (e) {
-            console.error("Error sorting chart data by date:", e);
-        }
-        return 0; // Default: no sort if dates invalid or parsing fails
+      if (isValid(dateFrom) && isValid(dateTo)) {
+        const periodKey = `${format(dateFrom, 'MMM dd')} - ${format(dateTo, 'MMM dd, yyyy')}`; // Format for X-axis label
+        groupedByPeriod[periodKey] = (groupedByPeriod[periodKey] || 0) + record.netPay;
+      } else {
+         console.warn("Skipping record with invalid parsed date:", record, dateFrom, dateTo);
+      }
     });
 
+    // Convert to array and sort by period start date (implicitly by key string format for now)
+    return Object.entries(groupedByPeriod)
+      .map(([payPeriod, totalNetPay]) => ({ payPeriod, totalNetPay }))
+      // A more robust sort might be needed if keys don't sort chronologically naturally
+      .sort((a, b) => {
+          // Attempt to parse start date from key for sorting
+          try {
+             const dateA = parseISO(a.payPeriod.split(' - ')[0] + ', ' + a.payPeriod.split(', ')[1]);
+             const dateB = parseISO(b.payPeriod.split(' - ')[0] + ', ' + b.payPeriod.split(', ')[1]);
+             if (isValid(dateA) && isValid(dateB)) {
+                 return dateA.getTime() - dateB.getTime();
+             }
+          } catch (e) {
+              // Fallback to string sort if parsing fails
+             return a.payPeriod.localeCompare(b.payPeriod);
+          }
+          return a.payPeriod.localeCompare(b.payPeriod); // Fallback sort
+      });
 
-    const handleLogout = () => {
-        // Optional: Clear relevant session/local storage on logout
-        // localStorage.removeItem('authToken'); // Example
-        router.push("/"); // Redirect to the login page
-    };
+  }, [wageRecords]);
 
-    return (
-        <div className="relative flex flex-col items-center min-h-screen text-white font-sans">
-            {/* Background Image */}
-            <Image
-                src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg" // Path to your image
-                alt="Background Image"
-                fill
-                objectFit="cover"
-                className="absolute inset-0 w-full h-full -z-10" // Use inset-0 for simplicity
-                priority // Load background image faster
-            />
+  const handleLogout = () => {
+    router.push('/'); // Redirect to the login page
+  };
 
-            {/* Dark Overlay for contrast */}
-            <div className="absolute inset-0 w-full h-full bg-black/70 -z-9" /> {/* Increased opacity */}
+  return (
+    <div className="relative flex flex-col items-center min-h-screen text-white font-sans">
+      {/* Background Image */}
+      <Image
+        src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg" // Path to your image
+        alt="Background Image"
+        fill
+        style={{ objectFit: 'cover' }}
+        className="absolute inset-0 w-full h-full -z-10"
+        priority
+      />
 
-            {/* Content Area - Centered with padding */}
-            <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow">
+      {/* Dark Overlay */}
+      <div className="absolute inset-0 w-full h-full bg-black/70 -z-9" />
 
-                {/* Header Section */}
-                <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-6">
-                     {/* Logo */}
-                     <div className="w-10 h-10 flex-shrink-0"> {/* Adjust size as needed */}
-                         <Image src="/logo.png" alt="Company Logo" width={40} height={40} />
-                    </div>
-                    {/* Title */}
-                    <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-center text-gray-100 flex-grow px-4">
-                        Lal's Motor Winders (FIJI) PTE Limited Dashboard
-                    </h1>
-                     {/* Logout Button */}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={handleLogout}
-                        className="text-red-400 hover:bg-white/10 hover:text-red-300 flex-shrink-0"
-                        aria-label="Logout"
-                    >
-                        <Power className="h-5 w-5" />
-                        <span className="sr-only">Logout</span>
-                    </Button>
-                </header>
+      {/* Content Area */}
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow">
+        {/* Header Section */}
+        <header className="w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 sm:mb-16">
+          {/* Logo - Moved outside the centering div if you want it aligned left */}
+          <div className="w-10 h-10 flex-shrink-0">
+            <Image src="/logo.png" alt="Company Logo" width={40} height={40} />
+          </div>
 
-                {/* Navigation Section */}
-                 <nav className="w-full flex flex-col sm:flex-row justify-center items-center gap-4 py-4 mb-8">
-                    <Button asChild variant="secondary" size="lg" className="w-full sm:w-auto hover:bg-gray-700/80">
-                        <Link href="/employees">Employee Management</Link>
-                    </Button>
-                    <Button asChild variant="secondary" size="lg" className="w-full sm:w-auto hover:bg-gray-700/80">
-                        <Link href="/wages">Wages Management</Link>
-                    </Button>
-                     <Button asChild variant="secondary" size="lg" className="w-full sm:w-auto hover:bg-gray-700/80">
-                         <Link href="/admin">Administrator</Link>
-                     </Button>
-                 </nav>
+          {/* Centered Title */}
+          <div className="flex-grow text-center">
+            <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-gray-100">
+              Lal&apos;s Motor Winders (FIJI) PTE Limited Dashboard
+            </h1>
+          </div>
 
-                {/* Chart Section - Using a Card-like style */}
-                <Card className="w-full bg-black/50 backdrop-blur-sm border border-white/20 rounded-xl shadow-xl mb-8 flex-grow overflow-hidden">
-                    <CardHeader>
-                         <CardTitle className="text-lg sm:text-xl font-medium text-center text-gray-200">
-                             Total Net Pay Trend per Pay Period
-                         </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 sm:p-6 h-[350px] sm:h-[450px]"> {/* Container with explicit height */}
-                        {chartData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart
-                                    data={chartData}
-                                    margin={{ top: 5, right: 20, left: 10, bottom: 40 }} // Adjusted margins, esp. bottom
-                                >
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.2)" />
-                                    <XAxis
-                                        dataKey="payWeek"
-                                        stroke="rgba(255, 255, 255, 0.7)"
-                                        tick={{ fontSize: 10, fill: 'rgba(255, 255, 255, 0.7)' }}
-                                        angle={-30} // Angle labels for better fit
-                                        textAnchor="end" // Anchor angled text correctly
-                                        height={60} // Increase height to accommodate angled labels
-                                        interval={0} // Show all labels if space allows, adjust if too crowded
-                                    />
-                                    <YAxis
-                                        stroke="rgba(255, 255, 255, 0.7)"
-                                        tickFormatter={(value) => `$${value.toFixed(0)}`} // Format as currency, no decimals
-                                        tick={{ fontSize: 11, fill: 'rgba(255, 255, 255, 0.7)' }}
-                                        domain={['auto', 'auto']} // Or set specific min/max if needed e.g. [0, 'auto']
-                                    />
-                                    <Tooltip
-                                        contentStyle={{
-                                            backgroundColor: 'rgba(30, 30, 30, 0.9)', // Darker semi-transparent background
-                                            border: '1px solid rgba(255, 255, 255, 0.3)',
-                                            borderRadius: '8px',
-                                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                                        }}
-                                        itemStyle={{ color: '#a7a7a7', fontSize: '13px' }} // Lighter text color
-                                        labelStyle={{ color: '#ffffff', fontWeight: 'bold', marginBottom: '6px', fontSize: '14px' }}
-                                        formatter={(value: number, name: string) => [`$${value.toFixed(2)}`, "Total Net Pay"]} // Format tooltip value precisely
-                                        labelFormatter={(label: string) => `Period: ${label}`} // Customize tooltip title
-                                        cursor={{ fill: 'rgba(255, 255, 255, 0.1)' }} // Subtle cursor highlight
-                                    />
-                                    <Line
-                                        type="monotone"
-                                        dataKey="totalNetPay"
-                                        stroke="#8884d8" // Primary line color
-                                        strokeWidth={2.5}
-                                        dot={{ r: 4, fill: '#8884d8', stroke: 'rgba(0,0,0,0.5)', strokeWidth: 1 }}
-                                        activeDot={{ r: 7, fill: '#6a61cc', stroke: '#fff', strokeWidth: 1 }}
-                                        connectNulls={true} // Good practice if data might have gaps
-                                        name="Total Net Pay" // Used by Tooltip/Legend
-                                    />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        ) : (
-                            <div className="flex items-center justify-center h-full text-gray-400">
-                                No wage data available to display chart. Add records in Wages Management.
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+          {/* Logout Button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleLogout}
+            className="text-red-400 hover:bg-white/10 hover:text-red-300 flex-shrink-0"
+            aria-label="Logout"
+          >
+            <Power className="h-5 w-5" />
+            <span className="sr-only">Logout</span>
+          </Button>
+        </header>
 
-            </div>
-            {/* Footer is now handled by RootLayout */}
-        </div>
-    );
+        {/* Navigation Section - Centered */}
+        <nav className="w-full flex justify-center items-center gap-5 py-4 mb-10">
+          <Button
+            asChild
+            variant="secondary" // Use a variant that looks good on the dark bg
+            size="lg"
+            className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
+          >
+            <Link href="/employees">Employee Management</Link>
+          </Button>
+          <Button
+            asChild
+            variant="secondary"
+            size="lg"
+            className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
+          >
+            <Link href="/wages">Wages Management</Link>
+          </Button>
+          <Button
+            asChild
+            variant="secondary"
+            size="lg"
+            className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
+          >
+            <Link href="/admin">Administrator</Link>
+          </Button>
+        </nav>
+
+        {/* Main Content Area - Graph Section */}
+        <main className="flex-grow flex items-center justify-center w-full pb-16">
+           <Card className="w-full max-w-4xl bg-black/40 backdrop-blur-sm border border-white/20 rounded-xl p-6 shadow-xl">
+             <CardHeader>
+               <CardTitle className="text-white text-center text-xl mb-4">
+                 Total Net Pay Trend per Pay Period
+               </CardTitle>
+             </CardHeader>
+             <CardContent>
+               {isLoading ? (
+                 <div className="text-center text-gray-400">Loading chart data...</div>
+               ) : chartData.length > 0 ? (
+                   <ResponsiveContainer width="100%" height={300}>
+                     <LineChart
+                       data={chartData}
+                       margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                     >
+                       <CartesianGrid strokeDasharray="3 3" stroke="#555" />
+                       <XAxis
+                         dataKey="payPeriod"
+                         stroke="#ccc"
+                         tick={{ fontSize: 10 }} // Smaller font size for x-axis labels
+                         angle={-30} // Angle labels if they overlap
+                         textAnchor="end" // Adjust anchor for angled labels
+                         height={50} // Increase height to accommodate angled labels
+                         interval={0} // Show all labels initially, adjust if needed
+                       />
+                       <YAxis stroke="#ccc" tickFormatter={(value) => `$${value.toFixed(0)}`} />
+                       <Tooltip
+                         contentStyle={{ backgroundColor: '#333', border: 'none', borderRadius: '5px' }}
+                         labelStyle={{ color: '#fff' }}
+                         itemStyle={{ color: '#88d1ff' }} // Light blue for tooltip item
+                         formatter={(value: number) => [`$${value.toFixed(2)}`, 'Total Net Pay']}
+                       />
+                       <Legend wrapperStyle={{ color: '#ccc' }} />
+                       <Line
+                         type="monotone"
+                         dataKey="totalNetPay"
+                         stroke="#88d1ff" // Light blue line color
+                         strokeWidth={2}
+                         dot={{ r: 4, fill: "#88d1ff" }} // Style points
+                         activeDot={{ r: 6, fill: "#fff", stroke: "#88d1ff" }} // Style active point
+                         name="Total Net Pay" // Legend name
+                       />
+                     </LineChart>
+                   </ResponsiveContainer>
+               ) : (
+                 <div className="text-center text-gray-400">No wage data available to display the chart.</div>
+               )}
+             </CardContent>
+           </Card>
+        </main>
+
+        {/* Footer is handled by RootLayout */}
+      </div>
+    </div>
+  );
 };
 
 export default DashboardPage;
 
-    

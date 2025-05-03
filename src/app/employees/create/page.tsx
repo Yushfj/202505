@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState } from 'react';
@@ -7,9 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Image from 'next/image';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/hooks/use-toast'; // Re-introduced useToast
 import { useRouter } from 'next/navigation';
-import { addEmployee } from '@/services/employee-service'; // Import the service function
+import { addEmployee, checkExistingFNPFNo } from '@/services/employee-service'; // Import service functions including the checker
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ArrowLeft, Home, Loader2 } from "lucide-react"; // Added Loader2 icon
 import Link from "next/link";
@@ -45,7 +44,7 @@ const CreateEmployeePage = () => {
     fnpfEligible: true, // Default to true
   });
   const [isLoading, setIsLoading] = useState(false); // State for loading indicator
-  const { toast } = useToast();
+  const { toast } = useToast(); // Initialize useToast
   const router = useRouter();
 
   // Generic handler for most input changes
@@ -56,7 +55,7 @@ const CreateEmployeePage = () => {
 
   // Handler for Select components (Bank Code)
   const handleBankCodeChange = (value: string) => {
-    setFormData(prev => ({ ...prev, bankCode: value }));
+    setFormData(prev => ({ ...prev, bankCode: value || null })); // Store null if empty
   };
 
   // Handler for RadioGroup changes (Branch, Payment Method)
@@ -95,9 +94,14 @@ const CreateEmployeePage = () => {
         }
     }
 
-    if (fnpfEligible && !fnpfNo?.trim()) { // Check fnpfNo?.trim() for null safety
-      errors.push('FNPF Number is required when employee is FNPF eligible.');
+    // Check FNPF number validity ONLY IF eligible and the input is not empty
+    if (fnpfEligible && !fnpfNo?.trim()) {
+        errors.push('FNPF Number is required when employee is FNPF eligible.');
+    } else if (fnpfEligible && fnpfNo && fnpfNo.trim().length > 0 && !/^\d+$/.test(fnpfNo.trim())) {
+        // Optional: Add regex check if FNPF needs to be numeric
+        // errors.push('FNPF Number must contain only digits.');
     }
+
 
     if (paymentMethod === 'online') {
       if (!bankCode) errors.push('Bank Code is required for online transfer.');
@@ -107,11 +111,12 @@ const CreateEmployeePage = () => {
     }
 
     if (errors.length > 0) {
-      toast({
+      toast({ // Use toast for validation errors
         title: 'Validation Error',
         description: errors.join(' '),
         variant: 'destructive',
       });
+      console.error('Validation Error:', errors.join(' ')); // Log error to console as well
       isValid = false;
     }
 
@@ -121,47 +126,75 @@ const CreateEmployeePage = () => {
   // Form submission handler
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!validateForm() || isLoading) { // Prevent submission if validating or already loading
+    console.log("Form submitted. Validating...");
+    if (!validateForm()) {
+        console.log("Validation failed.");
         return;
     }
+    if (isLoading) {
+        console.log("Submission blocked: Already processing.");
+        return; // Prevent multiple submissions
+    }
 
+    console.log("Validation passed. Starting submission process...");
     setIsLoading(true); // Start loading indicator
 
     // Prepare data for saving (ensure correct types and nulls)
     const employeeDataToSave: EmployeeData = {
         ...formData,
-        // Ensure specific fields are set to null if not applicable
-        fnpfNo: formData.fnpfEligible ? (formData.fnpfNo || null) : null,
+        fnpfNo: formData.fnpfEligible ? (formData.fnpfNo?.trim() || null) : null, // Ensure null if empty or ineligible
         tinNo: formData.tinNo?.trim() ? formData.tinNo : null, // Set to null if empty
         bankCode: formData.paymentMethod === 'online' ? (formData.bankCode || null) : null,
-        bankAccountNumber: formData.paymentMethod === 'online' ? (formData.bankAccountNumber || null) : null,
+        bankAccountNumber: formData.paymentMethod === 'online' ? (formData.bankAccountNumber?.trim() || null) : null, // Trim and ensure null
     };
 
+    console.log('Data prepared for saving:', employeeDataToSave);
 
     try {
-      console.log('Submitting employee data to database:', employeeDataToSave);
+        // --- Check for existing FNPF Number before attempting to add ---
+        if (employeeDataToSave.fnpfEligible && employeeDataToSave.fnpfNo) {
+            console.log(`Checking if FNPF No ${employeeDataToSave.fnpfNo} already exists...`);
+            const existingEmployee = await checkExistingFNPFNo(employeeDataToSave.fnpfNo);
+            if (existingEmployee) {
+                toast({ // Use toast for duplicate FNPF error
+                    title: 'Duplicate FNPF Number',
+                    description: `An employee with FNPF Number ${employeeDataToSave.fnpfNo} already exists.`,
+                    variant: 'destructive',
+                });
+                console.error(`Duplicate FNPF Number detected: ${employeeDataToSave.fnpfNo}`);
+                setIsLoading(false); // Stop loading
+                return; // Stop the submission
+            }
+             console.log(`FNPF No ${employeeDataToSave.fnpfNo} is unique. Proceeding...`);
+        }
+        // --- End FNPF Check ---
 
+      console.log('Attempting to call addEmployee service...');
       await addEmployee(employeeDataToSave); // Call the service function
+      console.log('addEmployee service call successful.');
 
-      toast({
+      toast({ // Use toast for success message
         title: 'Success',
         description: 'Employee created successfully!',
       });
+      console.log('Employee created successfully!'); // Log success to console
 
-      // Optionally reset form after successful submission
-      // setFormData({ ...initial state ... }); // Uncomment and define initial state if needed
-
+      console.log('Redirecting to /employees/information');
       // Redirect to the employee information page after success
       router.push('/employees/information');
 
     } catch (error: any) {
-      console.error('Error creating employee:', error);
-      toast({
+      console.error('Error during employee creation process:', error); // Log the full error object
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+
+      toast({ // Use toast for general creation errors
         title: 'Error Creating Employee',
         description: error.message || 'Failed to save employee data. Check console for details.',
         variant: 'destructive',
       });
     } finally {
+      console.log("Finishing submission process.");
       setIsLoading(false); // Stop loading indicator regardless of outcome
     }
   };
@@ -404,4 +437,3 @@ const CreateEmployeePage = () => {
 };
 
 export default CreateEmployeePage;
-
