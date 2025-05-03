@@ -16,39 +16,51 @@ interface Employee {
   paymentMethod: 'cash' | 'online'; // Payment method
   branch: 'labasa' | 'suva'; // Branch location
   fnpfEligible: boolean; // Eligibility for FNPF deduction
+  isActive: boolean; // Added to track active status
   created_at?: Date; // Added timestamp (optional)
   updated_at?: Date; // Added timestamp (optional)
 }
 
 /**
  * Fetches the list of employees from the PostgreSQL database.
+ * By default, only fetches active employees.
+ * @param {boolean} includeInactive - Whether to include inactive employees. Defaults to false.
  * @returns {Promise<Employee[]>} A promise that resolves with the array of employees.
  */
-export const getEmployees = async (): Promise<Employee[]> => {
+export const getEmployees = async (includeInactive = false): Promise<Employee[]> => {
+  let queryString = `
+    SELECT
+      id,
+      employee_name AS "name", -- Map employee_name from DB to name in interface
+      position,
+      hourly_wage AS "hourlyWage",
+      fnpf_no AS "fnpfNo",
+      tin_no AS "tinNo",
+      bank_code AS "bankCode",
+      bank_account_number AS "bankAccountNumber",
+      payment_method AS "paymentMethod",
+      branch,
+      fnpf_eligible AS "fnpfEligible",
+      is_active AS "isActive", -- Fetch is_active status
+      created_at,
+      updated_at
+    FROM employees1 -- Use the correct table name
+  `;
+
+  if (!includeInactive) {
+      queryString += ' WHERE is_active = TRUE';
+  }
+
+  queryString += ' ORDER BY branch, name;'; // Optional: order by branch then name
+
   try {
-    const result = await query(`
-      SELECT
-        id,
-        employee_name AS "name", -- Map employee_name from DB to name in interface
-        position,
-        hourly_wage AS "hourlyWage",
-        fnpf_no AS "fnpfNo",
-        tin_no AS "tinNo",
-        bank_code AS "bankCode",
-        bank_account_number AS "bankAccountNumber",
-        payment_method AS "paymentMethod",
-        branch,
-        fnpf_eligible AS "fnpfEligible",
-        created_at,
-        updated_at
-      FROM employees1 -- Use the correct table name
-      ORDER BY branch, name; -- Optional: order by branch then name
-    `);
+    const result = await query(queryString);
     // Ensure consistent data types, especially for boolean and potentially null values
      return result.rows.map(row => ({
         ...row,
         hourlyWage: String(row.hourlyWage || '0'), // Ensure string
         fnpfEligible: Boolean(row.fnpfEligible), // Ensure boolean
+        isActive: Boolean(row.isActive), // Ensure boolean
         // Handle potential nulls explicitly if necessary, though DB query should handle it
         fnpfNo: row.fnpfNo,
         tinNo: row.tinNo,
@@ -69,6 +81,8 @@ export const getEmployees = async (): Promise<Employee[]> => {
          errorMessage = 'Failed to fetch employees. Database password authentication failed.';
     } else if (error.message?.includes('Database pool is not available') || error.message?.includes('Database pool failed to initialize')) {
         errorMessage = 'Failed to fetch employees. Database connection pool is not available. Check server startup logs.';
+    } else if (error.message?.includes('Database connection is not available')) {
+         errorMessage = `Failed to fetch employees. Database connection is not available. Original error: ${error.message}`;
     }
      // Re-throw the potentially enhanced error message
      throw new Error(errorMessage);
@@ -76,11 +90,11 @@ export const getEmployees = async (): Promise<Employee[]> => {
 };
 
 /**
- * Adds a new employee to the PostgreSQL database.
- * @param {Omit<Employee, 'id' | 'created_at' | 'updated_at'>} employeeData - The employee data without the ID and timestamps.
+ * Adds a new employee to the PostgreSQL database. New employees are active by default.
+ * @param {Omit<Employee, 'id' | 'created_at' | 'updated_at' | 'isActive'>} employeeData - The employee data without the ID, timestamps, and active status.
  * @returns {Promise<string>} A promise that resolves with the ID of the newly created employee.
  */
-export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_at' | 'updated_at'>): Promise<string> => {
+export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_at' | 'updated_at' | 'isActive'>): Promise<string> => {
   const {
     name, // This is employee_name in the DB
     position,
@@ -119,8 +133,8 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
   try {
     console.log('Executing INSERT query...');
     const result = await query(
-      `INSERT INTO employees1 (employee_name, position, hourly_wage, fnpf_no, tin_no, bank_code, bank_account_number, payment_method, branch, fnpf_eligible)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO employees1 (employee_name, position, hourly_wage, fnpf_no, tin_no, bank_code, bank_account_number, payment_method, branch, fnpf_eligible, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE) -- New employees are active by default
        RETURNING id;`, // Use the correct table name
       [
         name, // This value goes into the employee_name column
@@ -166,6 +180,8 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
          errorMessage = `Failed to add employee. Could not resolve database host. Check network and DB connection details.`;
     } else if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
          errorMessage = `Failed to add employee. Connection refused. Check if database is running and accessible.`;
+    } else if (error.message?.includes('Database connection is not available')) {
+        errorMessage = `Failed to add employee. Database connection is not available. Original error: ${error.message}`;
     }
     // Keep the original error message for other unknown DB errors
     throw new Error(errorMessage);
@@ -175,7 +191,7 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
 /**
  * Checks if an employee with the given FNPF number already exists.
  * @param {string | null} fnpfNo - The FNPF number to check.
- * @returns {Promise<Employee | null>} Employee object (id) if exists, null otherwise.
+ * @returns {Promise<{ id: string } | null>} Employee object (id) if exists, null otherwise.
  */
 export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: string } | null> => {
     // If FNPF is not eligible or number is empty/null, no need to check
@@ -203,23 +219,20 @@ export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: 
         }
     } catch (error: any) {
         console.error("Error checking existing FNPF number:", error);
-        // Don't throw here, let the main addEmployee handle DB errors,
-        // but log it for debugging. Maybe return an error indicator if needed.
-        // For now, treat check failure as "doesn't exist" to avoid blocking unnecessarily,
+        // Treat check failure as "doesn't exist" to avoid blocking unnecessarily,
         // but the INSERT will fail later if there's a real duplicate.
-        // A more robust approach might involve specific error handling here.
-        return null; // Or throw new Error("Failed to check existing FNPF number.");
+        throw new Error("Failed to check existing FNPF number.");
     }
 };
 
 
 /**
  * Updates an existing employee's information in the PostgreSQL database.
- * @param {Employee} updatedEmployee - The employee object with updated information. ID must be included.
+ * @param {Omit<Employee, 'created_at' | 'updated_at'>} updatedEmployee - The employee object with updated information. ID and isActive must be included.
  * @returns {Promise<void>} A promise that resolves when the update is complete.
  * @throws {Error} If the employee with the specified ID is not found or update fails.
  */
-export const updateEmployee = async (updatedEmployee: Employee): Promise<void> => {
+export const updateEmployee = async (updatedEmployee: Omit<Employee, 'created_at' | 'updated_at'>): Promise<void> => {
   const {
     id,
     name, // This is employee_name in the DB
@@ -232,11 +245,12 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<void> =
     paymentMethod,
     branch,
     fnpfEligible,
+    isActive, // Include isActive status
   } = updatedEmployee;
 
    // Basic validation
-   if (!id || !name || !position || !hourlyWage) {
-     throw new Error('Missing required employee fields for update (id, name, position, hourlyWage).');
+   if (!id || !name || !position || !hourlyWage || typeof isActive !== 'boolean') {
+     throw new Error('Missing required employee fields for update (id, name, position, hourlyWage, isActive).');
    }
 
    // Ensure correct data types
@@ -264,8 +278,9 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<void> =
          payment_method = $8,
          branch = $9,
          fnpf_eligible = $10,
+         is_active = $11, -- Update is_active status
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = $11;`,
+       WHERE id = $12;`, // Adjust parameter index
       [
         name, // This value updates the employee_name column
         position,
@@ -277,6 +292,7 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<void> =
         paymentMethod,
         branch,
         fnpfEligible,
+        isActive, // Pass the isActive boolean
         id, // The ID for the WHERE clause
       ]
     );
@@ -299,7 +315,37 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<void> =
 };
 
 /**
+ * Sets the active status of an employee in the database.
+ * @param {string} employeeId - The ID of the employee.
+ * @param {boolean} isActive - The new active status (true for active, false for inactive).
+ * @returns {Promise<void>} A promise that resolves when the status is updated.
+ */
+export const setEmployeeActiveStatus = async (employeeId: string, isActive: boolean): Promise<void> => {
+    if (!employeeId) {
+        throw new Error('Employee ID is required to update active status.');
+    }
+
+    try {
+        const result = await query(
+            `UPDATE employees1 SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2;`,
+            [isActive, employeeId]
+        );
+
+        if (result.rowCount === 0) {
+            throw new Error(`Employee with ID ${employeeId} not found to update active status.`);
+        }
+        console.log(`Employee with ID ${employeeId} active status set to ${isActive}.`);
+    } catch (error: any) {
+        console.error(`Detailed error setting active status for employee ${employeeId}:`, error);
+        throw new Error(`Failed to update employee active status. DB Error: ${error.message || 'Unknown database error'}`);
+    }
+};
+
+
+/**
  * Deletes an employee from the PostgreSQL database by their ID.
+ * NOTE: Consider soft delete (setting is_active=false) instead of hard delete.
+ * This function performs a HARD delete.
  * @param {string} employeeId - The ID of the employee to delete.
  * @returns {Promise<void>} A promise that resolves when the deletion is complete.
  */
@@ -309,6 +355,14 @@ export const deleteEmployee = async (employeeId: string): Promise<void> => {
    }
 
   try {
+    // Before deleting, check for related wage records (optional but recommended)
+    const wageCheck = await query('SELECT 1 FROM wage_records WHERE employee_id = $1 LIMIT 1;', [employeeId]);
+    if (wageCheck.rowCount > 0) {
+        console.warn(`Attempting to delete employee ${employeeId} who has wage records. Consider inactivating instead.`);
+        // Optionally throw an error to prevent deletion if wage records exist
+        // throw new Error(`Cannot delete employee ${employeeId} as they have associated wage records. Consider marking as inactive instead.`);
+    }
+
     const result = await query('DELETE FROM employees1 WHERE id = $1;', [employeeId]); // Use the correct table name
 
     if (result.rowCount === 0) {
@@ -320,8 +374,12 @@ export const deleteEmployee = async (employeeId: string): Promise<void> => {
     }
   } catch (error: any) {
     console.error(`Detailed error deleting employee with ID ${employeeId}:`, error);
-    // Re-throw the original error from the query function
-    throw error;
+    let errorMessage = `Failed to delete employee. DB Error: ${error.message || 'Unknown database error'}`;
+     if (error.code === '23503') { // Foreign key violation
+        errorMessage = `Cannot delete employee ${employeeId}. They have associated records (e.g., wages) that must be deleted or handled first. Consider marking as inactive instead.`;
+     }
+    // Re-throw the potentially enhanced error message
+    throw new Error(errorMessage);
   }
 };
 
@@ -350,6 +408,7 @@ export const getEmployeeById = async (employeeId: string): Promise<Employee | nu
         payment_method AS "paymentMethod",
         branch,
         fnpf_eligible AS "fnpfEligible",
+        is_active AS "isActive", -- Fetch is_active status
         created_at,
         updated_at
       FROM employees1 -- Use the correct table name
@@ -366,6 +425,7 @@ export const getEmployeeById = async (employeeId: string): Promise<Employee | nu
         ...row,
         hourlyWage: String(row.hourlyWage || '0'),
         fnpfEligible: Boolean(row.fnpfEligible),
+        isActive: Boolean(row.isActive), // Ensure boolean
     } as Employee;
   } catch (error: any) {
     console.error(`Detailed error fetching employee with ID ${employeeId}:`, error);
@@ -383,8 +443,8 @@ interface WageRecord {
   employeeName: string;
   hourlyWage: number;
   totalHours: number; // Total hours worked
-  hoursWorked: number; // Normal hours (<= 40)
-  overtimeHours: number; // Overtime hours (> 40)
+  hoursWorked: number; // Normal hours (<= 45 or 48)
+  overtimeHours: number; // Overtime hours
   mealAllowance: number;
   fnpfDeduction: number;
   otherDeductions: number;
@@ -481,39 +541,43 @@ export const saveWageRecords = async (wageRecords: WageRecord[]): Promise<void> 
 export const getWageRecords = async (filterDateFrom: Date | null = null, filterDateTo: Date | null = null): Promise<WageRecord[]> => {
   let queryString = `
     SELECT
-      id,
-      employee_id AS "employeeId",
-      employee_name AS "employeeName",
-      hourly_wage AS "hourlyWage",
-      total_hours AS "totalHours", -- Fetch total hours
-      hours_worked AS "hoursWorked", -- Fetch normal hours
-      overtime_hours AS "overtimeHours", -- Fetch overtime hours
-      meal_allowance AS "mealAllowance",
-      fnpf_deduction AS "fnpfDeduction",
-      other_deductions AS "otherDeductions",
-      gross_pay AS "grossPay",
-      net_pay AS "netPay",
-      TO_CHAR(date_from, 'YYYY-MM-DD') AS "dateFrom", -- Format date as string
-      TO_CHAR(date_to, 'YYYY-MM-DD') AS "dateTo",     -- Format date as string
-      created_at
-    FROM wage_records
+      wr.id,
+      wr.employee_id AS "employeeId",
+      wr.employee_name AS "employeeName",
+      wr.hourly_wage AS "hourlyWage",
+      wr.total_hours AS "totalHours", -- Fetch total hours
+      wr.hours_worked AS "hoursWorked", -- Fetch normal hours
+      wr.overtime_hours AS "overtimeHours", -- Fetch overtime hours
+      wr.meal_allowance AS "mealAllowance",
+      wr.fnpf_deduction AS "fnpfDeduction",
+      wr.other_deductions AS "otherDeductions",
+      wr.gross_pay AS "grossPay",
+      wr.net_pay AS "netPay",
+      TO_CHAR(wr.date_from, 'YYYY-MM-DD') AS "dateFrom", -- Format date as string
+      TO_CHAR(wr.date_to, 'YYYY-MM-DD') AS "dateTo",     -- Format date as string
+      wr.created_at,
+      emp.bank_code AS "bankCode", -- Join to get bank details
+      emp.bank_account_number AS "bankAccountNumber", -- Join to get bank details
+      emp.payment_method AS "paymentMethod" -- Join to get payment method
+    FROM wage_records wr
+    JOIN employees1 emp ON wr.employee_id = emp.id -- Join with employees1 table
   `;
   const queryParams = [];
 
   // IMPORTANT: Ensure date parameters are correctly formatted for the query if provided
   if (filterDateFrom && filterDateTo && format(filterDateFrom, 'yyyy-MM-dd') && format(filterDateTo, 'yyyy-MM-dd')) {
-    queryString += ' WHERE date_from >= $1::date AND date_to <= $2::date';
+    queryString += ' WHERE wr.date_from >= $1::date AND wr.date_to <= $2::date';
     queryParams.push(format(filterDateFrom, 'yyyy-MM-dd')); // Format as YYYY-MM-DD string
     queryParams.push(format(filterDateTo, 'yyyy-MM-dd'));   // Format as YYYY-MM-DD string
   } else if (filterDateFrom && format(filterDateFrom, 'yyyy-MM-dd')) {
-    queryString += ' WHERE date_from >= $1::date';
+    queryString += ' WHERE wr.date_from >= $1::date';
     queryParams.push(format(filterDateFrom, 'yyyy-MM-dd'));
   } else if (filterDateTo && format(filterDateTo, 'yyyy-MM-dd')) {
-     queryString += ' WHERE date_to <= $1::date';
+     queryString += ' WHERE wr.date_to <= $1::date';
      queryParams.push(format(filterDateTo, 'yyyy-MM-dd'));
   }
 
-  queryString += ' ORDER BY date_from DESC, employee_name;'; // Order by date, then name
+  queryString += ' ORDER BY wr.date_from DESC, wr.employee_name;'; // Order by date, then name
 
   try {
     const result = await query(queryString, queryParams);
@@ -529,6 +593,7 @@ export const getWageRecords = async (filterDateFrom: Date | null = null, filterD
         otherDeductions: Number(row.otherDeductions) || 0,
         grossPay: Number(row.grossPay) || 0,
         netPay: Number(row.netPay) || 0,
+        // Bank details and payment method are now included from the join
     })) as WageRecord[];
   } catch (error: any) {
     console.error('Detailed error fetching wage records from database:', error);
