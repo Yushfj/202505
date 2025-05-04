@@ -17,7 +17,8 @@ const ADMIN_PASSWORD = 'admin01'; // Define admin password (store securely in re
 
 const ApproveWagesClient = () => {
     const searchParams = useSearchParams();
-    const token = searchParams.get('token');
+    // Use state for the token to avoid potential hydration issues with reading directly
+    const [token, setToken] = useState<string | null>(null);
     const { toast } = useToast();
 
     const [isLoading, setIsLoading] = useState(true); // Overall loading
@@ -33,9 +34,19 @@ const ApproveWagesClient = () => {
     const [loginError, setLoginError] = useState<string | null>(null);
     const [isLoggingIn, setIsLoggingIn] = useState(false); // Processing login
 
+    // Get token on client side after mount
+    useEffect(() => {
+        const tokenFromParams = searchParams.get('token');
+        setToken(tokenFromParams);
+        if (!tokenFromParams) {
+            setError('Invalid approval link: Missing token.');
+            setIsLoading(false); // Stop loading if no token
+        }
+    }, [searchParams]);
+
     const fetchAllData = useCallback(async () => {
         if (!token) {
-            setError('Invalid approval link: Missing token.');
+            // Error is already set in useEffect if token is missing initially
             setIsLoading(false);
             return;
         }
@@ -45,8 +56,9 @@ const ApproveWagesClient = () => {
             return;
         }
 
+        console.log("Fetching data for token:", token);
         setIsLoading(true);
-        setError(null);
+        setError(null); // Clear previous errors
         try {
             // Fetch both approval data and employee details
             const [data, fetchedEmployees] = await Promise.all([
@@ -54,13 +66,21 @@ const ApproveWagesClient = () => {
                 getEmployees(true) // Fetch all employees (active/inactive) to get payment method
             ]);
 
+             console.log("Fetched approval data:", data);
+             console.log("Fetched employees:", fetchedEmployees);
+
+
             if (!data) {
                 setError('Approval request not found or already processed.');
+                setApprovalData(null); // Clear data if not found
+                setDecision(null);
             } else if (data.approval.status !== 'pending') {
                  setError(`This request has already been ${data.approval.status}.`);
+                 setApprovalData(data); // Still show the data
                  setDecision(data.approval.status); // Show final status
             } else {
                 setApprovalData(data);
+                setDecision(null); // Ensure decision is null for pending
             }
             setEmployees(fetchedEmployees || []); // Store employee data
 
@@ -74,19 +94,27 @@ const ApproveWagesClient = () => {
                 userErrorMessage = 'Database error: Required table missing. Please contact support.';
              } else if (err.message?.includes('Failed to fetch wages for approval')) {
                 userErrorMessage = err.message; // Show the specific message from the service
+             } else {
+                userErrorMessage = err.message || userErrorMessage; // Use specific error if available
              }
              setError(userErrorMessage);
+             setApprovalData(null); // Clear data on error
+             setDecision(null);
         } finally {
             setIsLoading(false);
         }
     }, [token, isLoggedIn]); // Add isLoggedIn dependency
 
-    // Trigger data fetching once logged in
+    // Trigger data fetching once logged in and token is available
     useEffect(() => {
-        if (isLoggedIn) {
+        if (isLoggedIn && token) {
             fetchAllData();
+        } else if (!token && !error) {
+             // If token is still null/empty after initial effect and no error set yet
+             // setError('Invalid approval link: Missing token.');
+             setIsLoading(false); // Ensure loading stops
         }
-    }, [isLoggedIn, fetchAllData]); // Depend on isLoggedIn and the fetch function
+    }, [isLoggedIn, token, fetchAllData, error]); // Depend on token as well
 
 
     const handleLogin = async (event: React.FormEvent) => {
@@ -97,47 +125,67 @@ const ApproveWagesClient = () => {
         setLoginError(null);
 
         // Simulate async check if needed, or just compare directly
-        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 300)); // Shorter delay
 
         if (adminPassword === ADMIN_PASSWORD) {
             setIsLoggedIn(true);
             // Data fetching will be triggered by the useEffect above
         } else {
             setLoginError('Incorrect admin password.');
+            setIsLoggedIn(false); // Ensure logged out state
         }
         setIsLoggingIn(false);
     };
 
     const handleDecision = async (newStatus: 'approved' | 'declined') => {
-        if (!token || !approvalData || isProcessing || decision) return;
+        // Ensure token and data are present, not already processing, and not already decided
+        if (!token || !approvalData || approvalData.approval.status !== 'pending' || isProcessing || decision) {
+            console.warn("Decision handling blocked:", { token, approvalData, isProcessing, decision });
+            if (decision) {
+                toast({ title: 'Info', description: `Request already ${decision}.`, variant: 'default' });
+            } else if (isProcessing) {
+                 toast({ title: 'Info', description: 'Processing previous request...', variant: 'default' });
+            } else if (!approvalData || approvalData.approval.status !== 'pending'){
+                 toast({ title: 'Info', description: 'Cannot process request. Status is not pending.', variant: 'default' });
+            } else {
+                 toast({ title: 'Error', description: 'Cannot process request. Missing required data.', variant: 'destructive' });
+            }
+            return;
+        }
 
         setIsProcessing(true);
+        setError(null); // Clear previous errors before attempting update
+
         try {
-            // Pass admin password for potential server-side verification if needed, or just use approverName
+             console.log(`Attempting to set status to ${newStatus} for token: ${token}`);
+             // Pass admin password for potential server-side verification if needed, or just use approverName
             const updatedApproval = await updateWageApprovalStatus(token, newStatus, 'Admin'); // Use 'Admin' or logged-in user
+
+             console.log("Update result:", updatedApproval);
+
             if (updatedApproval) {
-                setDecision(newStatus);
-                setApprovalData(prev => prev ? { ...prev, approval: updatedApproval } : null);
+                setDecision(newStatus); // Update the decision state
+                setApprovalData(prev => prev ? { ...prev, approval: updatedApproval } : null); // Update the displayed data
                 toast({
                     title: `Wages ${newStatus}`,
                     description: `The wage records for this period have been ${newStatus}.`,
                 });
             } else {
-                setError('Failed to update status. The request might have been processed already.');
-                toast({ title: 'Error', description: 'Failed to update status.', variant: 'destructive' });
-                // Refetch to get the latest status
-                 const latestData = await getWagesForApproval(token);
-                 if (latestData) {
-                    setApprovalData(latestData);
-                    setDecision(latestData.approval.status);
-                 }
+                 // This case might happen if the status changed between fetch and update attempt
+                 setError('Failed to update status. The request might have been processed already or an unknown error occurred.');
+                 toast({ title: 'Error', description: 'Failed to update status. Please refresh.', variant: 'destructive' });
+                 // Attempt to refetch to show the most current state
+                 await fetchAllData();
             }
         } catch (err: any) {
             console.error(`Error ${newStatus} wages:`, err);
-            setError(err.message || `Failed to ${newStatus} wages.`);
-            toast({ title: 'Error', description: `Failed to ${newStatus} wages. ${err.message}`, variant: 'destructive' });
+            const specificMessage = err.message || `Failed to ${newStatus} wages.`;
+            setError(specificMessage);
+            toast({ title: 'Error', description: specificMessage, variant: 'destructive' });
+            // Don't refetch here automatically, let the user decide or refresh
+            // await fetchAllData(); // Avoid potential loop if fetch also fails
         } finally {
-            setIsProcessing(false);
+            setIsProcessing(false); // Ensure processing state is reset
         }
     };
 
@@ -145,10 +193,10 @@ const ApproveWagesClient = () => {
 
     const renderLoginForm = () => {
         return (
-             <Card className="w-full max-w-md shadow-lg">
+             <Card className="w-full max-w-md shadow-lg bg-white text-gray-900">
                 <CardHeader>
                     <CardTitle className="text-2xl text-center">Admin Login Required</CardTitle>
-                    <CardDescription className="text-center">
+                    <CardDescription className="text-center text-gray-600">
                         Please enter the admin password to view and approve/decline wages.
                     </CardDescription>
                 </CardHeader>
@@ -169,11 +217,11 @@ const ApproveWagesClient = () => {
                                 value={adminPassword}
                                 onChange={(e) => setAdminPassword(e.target.value)}
                                 required
-                                className="text-black" // Ensure text is visible
+                                className="text-black border-gray-300 focus:ring-primary focus:border-primary" // Ensure text is visible and standard input styling
                                 disabled={isLoggingIn}
                             />
                         </div>
-                        <Button type="submit" className="w-full" disabled={isLoggingIn}>
+                        <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isLoggingIn}>
                             {isLoggingIn ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogIn className="mr-2 h-4 w-4" />}
                             Login
                         </Button>
@@ -186,26 +234,30 @@ const ApproveWagesClient = () => {
     const renderApprovalContent = () => {
         if (isLoading) {
             return (
-                <div className="flex justify-center items-center py-10">
+                <div className="flex justify-center items-center py-10 text-white">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     <p className="ml-3 text-lg">Loading approval details...</p>
                 </div>
             );
         }
 
+        // Show general errors first
         if (error) {
             return (
-                <div className="text-center py-10 text-red-600">
-                    <AlertTriangle className="h-10 w-10 mx-auto mb-3" />
-                    <p className="text-xl font-semibold">Error Loading Approval</p>
-                    <p className="text-base">{error}</p>
-                     <p className="text-sm mt-4 text-muted-foreground">If the problem persists, please contact support.</p>
-                </div>
+                <Alert variant="destructive" className="w-full max-w-xl mx-auto bg-red-100 dark:bg-red-900/30 border-red-500">
+                    <AlertTriangle className="h-5 w-5 text-red-700 dark:text-red-500" />
+                    <AlertTitle className="text-red-800 dark:text-red-300">Error Loading Approval</AlertTitle>
+                    <AlertDescription className="text-red-700 dark:text-red-400">
+                        {error}
+                        <p className="text-sm mt-2">If the problem persists, please contact support or try refreshing the page.</p>
+                    </AlertDescription>
+                </Alert>
             );
         }
 
         if (!approvalData) {
-             return <div className="text-center py-10">Approval data not available.</div>;
+             // This case should ideally be covered by the error state if fetching failed
+             return <div className="text-center py-10 text-gray-400">Approval data not available or token is invalid.</div>;
          }
 
         const { approval, records } = approvalData;
@@ -218,10 +270,15 @@ const ApproveWagesClient = () => {
         records.forEach(record => {
             totalNetPay += record.netPay;
             const employee = employees.find(emp => emp.id === record.employeeId);
+            // Ensure employee exists and paymentMethod is checked
             if (employee?.paymentMethod === 'online') {
                 totalNetOnline += record.netPay;
+            } else if (employee?.paymentMethod === 'cash') { // Explicitly check for cash
+                 totalNetCash += record.netPay;
             } else {
-                totalNetCash += record.netPay;
+                // Handle cases where employee might not be found or has unexpected paymentMethod
+                 console.warn(`Could not determine payment method for record ID ${record.id}, employee ID ${record.employeeId}. Assuming cash.`);
+                 totalNetCash += record.netPay; // Default assumption or handle as needed
             }
         });
 
@@ -233,36 +290,43 @@ const ApproveWagesClient = () => {
         const formattedDateFrom = dateFromObj && isValid(dateFromObj) ? format(dateFromObj, 'MMM dd, yyyy') : 'Invalid Date';
         const formattedDateTo = dateToObj && isValid(dateToObj) ? format(dateToObj, 'MMM dd, yyyy') : 'Invalid Date';
         const decisionTimestamp = approval.approved_at || approval.declined_at;
-        const decisionDateObj = decisionTimestamp ? parseISO(decisionTimestamp as unknown as string) : null;
-        const formattedDecisionDate = decisionDateObj && isValid(decisionDateObj) ? format(decisionDateObj, 'MMM dd, yyyy') : '';
+         // Ensure timestamp is treated as string for parseISO if it's a Date object from DB
+         const decisionTimestampStr = typeof decisionTimestamp === 'string' ? decisionTimestamp : decisionTimestamp?.toISOString();
+         const decisionDateObj = decisionTimestampStr ? parseISO(decisionTimestampStr) : null;
+        const formattedDecisionDate = decisionDateObj && isValid(decisionDateObj) ? format(decisionDateObj, 'MMM dd, yyyy, h:mm a') : ''; // Add time
 
 
         return (
-            <Card className="w-full max-w-6xl shadow-lg">
+            <Card className="w-full max-w-6xl shadow-lg bg-black/60 backdrop-blur-sm border border-white/20 text-white">
                  <CardHeader>
                     <CardTitle className="text-2xl text-center">Wage Approval Request</CardTitle>
-                    <CardDescription className="text-center">
+                    <CardDescription className="text-center text-gray-300">
                         Period: {formattedDateFrom} - {formattedDateTo} <br />
                         Overall Total Net Pay: ${totalNetPay.toFixed(2)} <br />
-                        Current Status: <span className={`font-semibold ${approval.status === 'pending' ? 'text-orange-500' : approval.status === 'approved' ? 'text-green-500' : 'text-red-500'}`}>{approval.status.toUpperCase()}</span>
+                        Current Status: <span className={`font-semibold ${approval.status === 'pending' ? 'text-yellow-400' : approval.status === 'approved' ? 'text-green-400' : 'text-red-400'}`}>{approval.status.toUpperCase()}</span>
+                         {isFinalState && formattedDecisionDate && (
+                           <span className="text-xs block mt-1">
+                               (Decided on {formattedDecisionDate} {approval.approved_by ? `by ${approval.approved_by}` : ''})
+                           </span>
+                        )}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="overflow-x-auto mb-6 border rounded-lg">
+                    <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
                         <Table>
-                            <TableHeader className="bg-muted/50">
-                                <TableRow>
-                                    <TableHead>Employee</TableHead>
-                                    <TableHead>Payment Method</TableHead>
-                                    <TableHead className="text-right">Wage</TableHead>
-                                    <TableHead className="text-right">Total Hrs</TableHead>
-                                    <TableHead className="text-right">Normal Hrs</TableHead>
-                                    <TableHead className="text-right">O/T Hrs</TableHead>
-                                    <TableHead className="text-right">Meal</TableHead>
-                                    <TableHead className="text-right">FNPF</TableHead>
-                                    <TableHead className="text-right">Deduct</TableHead>
-                                    <TableHead className="text-right">Gross</TableHead>
-                                    <TableHead className="text-right">Net Pay</TableHead>
+                             <TableHeader className="bg-white/10">
+                                <TableRow className="hover:bg-transparent">
+                                    <TableHead className="text-white border-r border-white/20">Employee</TableHead>
+                                    <TableHead className="text-white border-r border-white/20">Payment Method</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">Total Hrs</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">Normal Hrs</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
+                                    <TableHead className="text-white border-r border-white/20 text-right">Gross</TableHead>
+                                    <TableHead className="text-white text-right">Net Pay</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -270,36 +334,36 @@ const ApproveWagesClient = () => {
                                      const employee = employees.find(emp => emp.id === record.employeeId);
                                      const paymentMethodDisplay = employee ? (employee.paymentMethod === 'online' ? 'Online' : 'Cash') : 'N/A';
                                     return (
-                                        <TableRow key={record.id}>
-                                            <TableCell>{record.employeeName}</TableCell>
-                                            <TableCell>{paymentMethodDisplay}</TableCell>
-                                            <TableCell className="text-right">${record.hourlyWage.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">{record.totalHours.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">{record.hoursWorked.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">{record.overtimeHours.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">${record.mealAllowance.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">${record.fnpfDeduction.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">${record.otherDeductions.toFixed(2)}</TableCell>
-                                            <TableCell className="text-right">${record.grossPay.toFixed(2)}</TableCell>
+                                        <TableRow key={record.id} className="hover:bg-white/5">
+                                            <TableCell className="border-r border-white/10">{record.employeeName}</TableCell>
+                                            <TableCell className="border-r border-white/10">{paymentMethodDisplay}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">${record.hourlyWage.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">{record.totalHours.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">{record.hoursWorked.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">{record.overtimeHours.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">${record.mealAllowance.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">${record.fnpfDeduction.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">${record.otherDeductions.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right border-r border-white/10">${record.grossPay.toFixed(2)}</TableCell>
                                             <TableCell className="text-right font-medium">${record.netPay.toFixed(2)}</TableCell>
                                         </TableRow>
                                     );
                                 })}
-                                <TableRow className="font-bold bg-muted/50">
-                                     <TableCell colSpan={10} className="text-right">Total Net Pay:</TableCell>
-                                     <TableCell className="text-right">${totalNetPay.toFixed(2)}</TableCell>
+                                <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
+                                     <TableCell colSpan={10} className="text-right pr-4 border-r border-white/10">Total Net Pay:</TableCell>
+                                     <TableCell className="text-right font-semibold">${totalNetPay.toFixed(2)}</TableCell>
                                 </TableRow>
                             </TableBody>
                         </Table>
                     </div>
 
-                    {approval.status === 'pending' && !decision && (
+                    {approval.status === 'pending' && ( // Show buttons only if status is pending
                         <div className="flex justify-center gap-4 mt-6">
                             <Button
                                 variant="destructive"
                                 size="lg"
                                 onClick={() => handleDecision('declined')}
-                                disabled={isProcessing}
+                                disabled={isProcessing} // Disable both if processing
                             >
                                 {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
                                 Decline
@@ -308,8 +372,8 @@ const ApproveWagesClient = () => {
                                 variant="default"
                                 size="lg"
                                 onClick={() => handleDecision('approved')}
-                                disabled={isProcessing}
-                                className="bg-green-600 hover:bg-green-700"
+                                disabled={isProcessing} // Disable both if processing
+                                className="bg-green-600 hover:bg-green-700 text-white" // Explicitly style approve button
                             >
                                 {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                                 Approve
@@ -317,28 +381,25 @@ const ApproveWagesClient = () => {
                         </div>
                     )}
 
-                    {isFinalState && (
-                        <div className={`mt-6 text-center ${approval.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>
+                    {isFinalState && ( // Show final status message if approved or declined
+                        <div className={`mt-6 text-center ${approval.status === 'approved' ? 'text-green-400' : 'text-red-400'}`}>
                             {approval.status === 'approved' ? <CheckCircle className="h-8 w-8 mx-auto mb-2" /> : <XCircle className="h-8 w-8 mx-auto mb-2" />}
-                            <p className="font-semibold">Wages {approval.status === 'approved' ? 'Approved' : 'Declined'}</p>
-                            <p className="text-sm text-muted-foreground">
-                                This request was {approval.status} {formattedDecisionDate ? `on ${formattedDecisionDate}` : ''}
-                                {approval.approved_by ? ` by ${approval.approved_by}` : ''}.
-                            </p>
+                            <p className="font-semibold text-xl">Wages {approval.status === 'approved' ? 'Approved' : 'Declined'}</p>
+                             {/* Decision details moved to header */}
                         </div>
                     )}
                 </CardContent>
-                 <CardFooter className="flex justify-around pt-6 border-t">
+                 <CardFooter className="flex flex-col sm:flex-row justify-around pt-6 border-t border-white/10 mt-6 space-y-4 sm:space-y-0">
                      <div className="text-center">
-                         <p className="text-sm text-muted-foreground">Total Net (Online)</p>
+                         <p className="text-sm text-gray-400">Total Net (Online)</p>
                          <p className="text-lg font-semibold">${totalNetOnline.toFixed(2)}</p>
                      </div>
                      <div className="text-center">
-                         <p className="text-sm text-muted-foreground">Total Net (Cash)</p>
+                         <p className="text-sm text-gray-400">Total Net (Cash)</p>
                          <p className="text-lg font-semibold">${totalNetCash.toFixed(2)}</p>
                      </div>
                      <div className="text-center">
-                         <p className="text-sm text-muted-foreground">Overall Total Net</p>
+                         <p className="text-sm text-gray-400">Overall Total Net</p>
                          <p className="text-lg font-semibold">${totalNetPay.toFixed(2)}</p>
                      </div>
                  </CardFooter>
@@ -347,10 +408,25 @@ const ApproveWagesClient = () => {
     };
 
     return (
-        <div className="flex justify-center items-center min-h-screen bg-muted p-4">
-            {/* Show login form or approval content based on login state */}
-            {!isLoggedIn ? renderLoginForm() : renderApprovalContent()}
-        </div>
+         <div className="flex justify-center items-start min-h-screen bg-muted p-4 pt-10 sm:pt-16">
+             {/* Apply background globally */}
+             <div className="absolute inset-0 -z-10">
+                 <Image
+                     src="/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg"
+                     alt="Background"
+                     fill
+                     style={{ objectFit: 'cover' }}
+                     priority
+                 />
+                 <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+             </div>
+
+            {/* Content Area */}
+             <div className="relative z-10 w-full flex justify-center">
+                 {/* Show login form or approval content based on login state */}
+                 {!isLoggedIn ? renderLoginForm() : renderApprovalContent()}
+             </div>
+         </div>
     );
 };
 
