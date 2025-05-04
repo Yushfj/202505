@@ -1,90 +1,128 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getWagesForApproval, updateWageApprovalStatus, type WageRecord, type WageApproval, type Employee, getEmployees } from '@/services/employee-service';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, LogIn } from 'lucide-react'; // Added LogIn
 import { useToast } from '@/hooks/use-toast';
 import { format, isValid, parseISO } from 'date-fns';
+import { Input } from '@/components/ui/input'; // Added Input
+import { Label } from '@/components/ui/label'; // Added Label
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added Alert
 
+const ADMIN_PASSWORD = 'admin01'; // Define admin password (store securely in real app)
 
 const ApproveWagesClient = () => {
     const searchParams = useSearchParams();
     const token = searchParams.get('token');
     const { toast } = useToast();
 
-    const [isLoading, setIsLoading] = useState(true);
-    const [isProcessing, setIsProcessing] = useState(false);
+    const [isLoading, setIsLoading] = useState(true); // Overall loading
+    const [isProcessing, setIsProcessing] = useState(false); // Processing approval/decline
     const [approvalData, setApprovalData] = useState<{ approval: WageApproval; records: WageRecord[] } | null>(null);
-    const [employees, setEmployees] = useState<Employee[]>([]); // State to hold employee details for payment method
+    const [employees, setEmployees] = useState<Employee[]>([]);
     const [error, setError] = useState<string | null>(null);
-    const [decision, setDecision] = useState<'approved' | 'declined' | null>(null); // Track final decision
+    const [decision, setDecision] = useState<'approved' | 'declined' | null>(null);
 
+    // --- Login State ---
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [adminPassword, setAdminPassword] = useState('');
+    const [loginError, setLoginError] = useState<string | null>(null);
+    const [isLoggingIn, setIsLoggingIn] = useState(false); // Processing login
+
+    const fetchAllData = useCallback(async () => {
+        if (!token) {
+            setError('Invalid approval link: Missing token.');
+            setIsLoading(false);
+            return;
+        }
+        // Only fetch if logged in
+        if (!isLoggedIn) {
+            setIsLoading(false); // Stop initial loading indicator if not logged in
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+        try {
+            // Fetch both approval data and employee details
+            const [data, fetchedEmployees] = await Promise.all([
+                getWagesForApproval(token),
+                getEmployees(true) // Fetch all employees (active/inactive) to get payment method
+            ]);
+
+            if (!data) {
+                setError('Approval request not found or already processed.');
+            } else if (data.approval.status !== 'pending') {
+                 setError(`This request has already been ${data.approval.status}.`);
+                 setDecision(data.approval.status); // Show final status
+            } else {
+                setApprovalData(data);
+            }
+            setEmployees(fetchedEmployees || []); // Store employee data
+
+        } catch (err: any) {
+            console.error("Error fetching approval or employee data:", err);
+            // Provide a more user-friendly error based on common DB issues
+            let userErrorMessage = 'Failed to load approval details.';
+             if (err.message?.includes('password authentication failed')) {
+                 userErrorMessage = 'Database connection failed. Please contact support.';
+             } else if (err.message?.includes('table not found')) {
+                userErrorMessage = 'Database error: Required table missing. Please contact support.';
+             } else if (err.message?.includes('Failed to fetch wages for approval')) {
+                userErrorMessage = err.message; // Show the specific message from the service
+             }
+             setError(userErrorMessage);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [token, isLoggedIn]); // Add isLoggedIn dependency
+
+    // Trigger data fetching once logged in
     useEffect(() => {
-        const fetchAllData = async () => {
-            if (!token) {
-                setError('Invalid approval link: Missing token.');
-                setIsLoading(false);
-                return;
-            }
+        if (isLoggedIn) {
+            fetchAllData();
+        }
+    }, [isLoggedIn, fetchAllData]); // Depend on isLoggedIn and the fetch function
 
-            setIsLoading(true);
-            setError(null);
-            try {
-                // Fetch both approval data and employee details
-                const [data, fetchedEmployees] = await Promise.all([
-                    getWagesForApproval(token),
-                    getEmployees(true) // Fetch all employees (active/inactive) to get payment method
-                ]);
 
-                if (!data) {
-                    setError('Approval request not found or already processed.');
-                } else if (data.approval.status !== 'pending') {
-                     setError(`This request has already been ${data.approval.status}.`);
-                     setDecision(data.approval.status); // Show final status
-                } else {
-                    setApprovalData(data);
-                }
-                setEmployees(fetchedEmployees || []); // Store employee data
+    const handleLogin = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (isLoggingIn) return;
 
-            } catch (err: any) {
-                console.error("Error fetching approval or employee data:", err);
-                // Provide a more user-friendly error based on common DB issues
-                let userErrorMessage = 'Failed to load approval details.';
-                 if (err.message?.includes('password authentication failed')) {
-                     userErrorMessage = 'Database connection failed. Please contact support.';
-                 } else if (err.message?.includes('table not found')) {
-                    userErrorMessage = 'Database error: Required table missing. Please contact support.';
-                 } else if (err.message?.includes('Failed to fetch wages for approval')) {
-                    userErrorMessage = err.message; // Show the specific message from the service
-                 }
-                 setError(userErrorMessage);
-            } finally {
-                setIsLoading(false);
-            }
-        };
+        setIsLoggingIn(true);
+        setLoginError(null);
 
-        fetchAllData();
-    }, [token]);
+        // Simulate async check if needed, or just compare directly
+        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+
+        if (adminPassword === ADMIN_PASSWORD) {
+            setIsLoggedIn(true);
+            // Data fetching will be triggered by the useEffect above
+        } else {
+            setLoginError('Incorrect admin password.');
+        }
+        setIsLoggingIn(false);
+    };
 
     const handleDecision = async (newStatus: 'approved' | 'declined') => {
-        if (!token || !approvalData || isProcessing || decision) return; // Prevent action if already decided or processing
+        if (!token || !approvalData || isProcessing || decision) return;
 
         setIsProcessing(true);
         try {
-            const updatedApproval = await updateWageApprovalStatus(token, newStatus, 'Admin'); // Replace 'Admin' with actual user if available
+            // Pass admin password for potential server-side verification if needed, or just use approverName
+            const updatedApproval = await updateWageApprovalStatus(token, newStatus, 'Admin'); // Use 'Admin' or logged-in user
             if (updatedApproval) {
-                setDecision(newStatus); // Set the final decision
-                setApprovalData(prev => prev ? { ...prev, approval: updatedApproval } : null); // Update local state
+                setDecision(newStatus);
+                setApprovalData(prev => prev ? { ...prev, approval: updatedApproval } : null);
                 toast({
                     title: `Wages ${newStatus}`,
                     description: `The wage records for this period have been ${newStatus}.`,
                 });
             } else {
-                // This might happen if the status was changed by someone else concurrently
                 setError('Failed to update status. The request might have been processed already.');
                 toast({ title: 'Error', description: 'Failed to update status.', variant: 'destructive' });
                 // Refetch to get the latest status
@@ -103,7 +141,49 @@ const ApproveWagesClient = () => {
         }
     };
 
-    const renderContent = () => {
+    // --- Render Functions ---
+
+    const renderLoginForm = () => {
+        return (
+             <Card className="w-full max-w-md shadow-lg">
+                <CardHeader>
+                    <CardTitle className="text-2xl text-center">Admin Login Required</CardTitle>
+                    <CardDescription className="text-center">
+                        Please enter the admin password to view and approve/decline wages.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {loginError && (
+                         <Alert variant="destructive" className="mb-4">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertTitle>Login Failed</AlertTitle>
+                            <AlertDescription>{loginError}</AlertDescription>
+                        </Alert>
+                    )}
+                    <form onSubmit={handleLogin} className="space-y-4">
+                         <div>
+                            <Label htmlFor="admin-password">Admin Password</Label>
+                            <Input
+                                id="admin-password"
+                                type="password"
+                                value={adminPassword}
+                                onChange={(e) => setAdminPassword(e.target.value)}
+                                required
+                                className="text-black" // Ensure text is visible
+                                disabled={isLoggingIn}
+                            />
+                        </div>
+                        <Button type="submit" className="w-full" disabled={isLoggingIn}>
+                            {isLoggingIn ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogIn className="mr-2 h-4 w-4" />}
+                            Login
+                        </Button>
+                    </form>
+                </CardContent>
+             </Card>
+        );
+    };
+
+    const renderApprovalContent = () => {
         if (isLoading) {
             return (
                 <div className="flex justify-center items-center py-10">
@@ -119,20 +199,18 @@ const ApproveWagesClient = () => {
                     <AlertTriangle className="h-10 w-10 mx-auto mb-3" />
                     <p className="text-xl font-semibold">Error Loading Approval</p>
                     <p className="text-base">{error}</p>
-                     {/* Optionally add a link back or instructions */}
                      <p className="text-sm mt-4 text-muted-foreground">If the problem persists, please contact support.</p>
                 </div>
             );
         }
 
         if (!approvalData) {
-             // Should be covered by error state, but as a fallback
              return <div className="text-center py-10">Approval data not available.</div>;
          }
 
         const { approval, records } = approvalData;
 
-        // Calculate Totals including Online and Cash
+        // Calculate Totals
         let totalNetPay = 0;
         let totalNetOnline = 0;
         let totalNetCash = 0;
@@ -142,7 +220,7 @@ const ApproveWagesClient = () => {
             const employee = employees.find(emp => emp.id === record.employeeId);
             if (employee?.paymentMethod === 'online') {
                 totalNetOnline += record.netPay;
-            } else { // Assume cash if not online or employee not found (shouldn't happen ideally)
+            } else {
                 totalNetCash += record.netPay;
             }
         });
@@ -155,13 +233,13 @@ const ApproveWagesClient = () => {
         const formattedDateFrom = dateFromObj && isValid(dateFromObj) ? format(dateFromObj, 'MMM dd, yyyy') : 'Invalid Date';
         const formattedDateTo = dateToObj && isValid(dateToObj) ? format(dateToObj, 'MMM dd, yyyy') : 'Invalid Date';
         const decisionTimestamp = approval.approved_at || approval.declined_at;
-        const decisionDateObj = decisionTimestamp ? parseISO(decisionTimestamp as unknown as string) : null; // Handle potential non-string type initially
+        const decisionDateObj = decisionTimestamp ? parseISO(decisionTimestamp as unknown as string) : null;
         const formattedDecisionDate = decisionDateObj && isValid(decisionDateObj) ? format(decisionDateObj, 'MMM dd, yyyy') : '';
 
 
         return (
-            <>
-                <CardHeader>
+            <Card className="w-full max-w-6xl shadow-lg">
+                 <CardHeader>
                     <CardTitle className="text-2xl text-center">Wage Approval Request</CardTitle>
                     <CardDescription className="text-center">
                         Period: {formattedDateFrom} - {formattedDateTo} <br />
@@ -175,7 +253,7 @@ const ApproveWagesClient = () => {
                             <TableHeader className="bg-muted/50">
                                 <TableRow>
                                     <TableHead>Employee</TableHead>
-                                    <TableHead>Payment Method</TableHead> {/* Added Column */}
+                                    <TableHead>Payment Method</TableHead>
                                     <TableHead className="text-right">Wage</TableHead>
                                     <TableHead className="text-right">Total Hrs</TableHead>
                                     <TableHead className="text-right">Normal Hrs</TableHead>
@@ -194,7 +272,7 @@ const ApproveWagesClient = () => {
                                     return (
                                         <TableRow key={record.id}>
                                             <TableCell>{record.employeeName}</TableCell>
-                                            <TableCell>{paymentMethodDisplay}</TableCell> {/* Display Payment Method */}
+                                            <TableCell>{paymentMethodDisplay}</TableCell>
                                             <TableCell className="text-right">${record.hourlyWage.toFixed(2)}</TableCell>
                                             <TableCell className="text-right">{record.totalHours.toFixed(2)}</TableCell>
                                             <TableCell className="text-right">{record.hoursWorked.toFixed(2)}</TableCell>
@@ -215,7 +293,6 @@ const ApproveWagesClient = () => {
                         </Table>
                     </div>
 
-                    {/* Show buttons only if status is pending and no final decision made locally */}
                     {approval.status === 'pending' && !decision && (
                         <div className="flex justify-center gap-4 mt-6">
                             <Button
@@ -240,7 +317,6 @@ const ApproveWagesClient = () => {
                         </div>
                     )}
 
-                     {/* Show final status message if already processed or decision made */}
                     {isFinalState && (
                         <div className={`mt-6 text-center ${approval.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>
                             {approval.status === 'approved' ? <CheckCircle className="h-8 w-8 mx-auto mb-2" /> : <XCircle className="h-8 w-8 mx-auto mb-2" />}
@@ -266,15 +342,14 @@ const ApproveWagesClient = () => {
                          <p className="text-lg font-semibold">${totalNetPay.toFixed(2)}</p>
                      </div>
                  </CardFooter>
-            </>
+            </Card>
         );
     };
 
     return (
         <div className="flex justify-center items-center min-h-screen bg-muted p-4">
-            <Card className="w-full max-w-6xl shadow-lg"> {/* Increased max-width */}
-                {renderContent()}
-            </Card>
+            {/* Show login form or approval content based on login state */}
+            {!isLoggedIn ? renderLoginForm() : renderApprovalContent()}
         </div>
     );
 };
