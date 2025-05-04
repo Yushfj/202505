@@ -1,3 +1,4 @@
+
 'use client';
 
 import {useState, useEffect, useMemo, useCallback} from 'react';
@@ -134,6 +135,7 @@ const CreateWagesPage = () => {
   const [totalSuvaWages, setTotalSuvaWages] = useState<number>(0);
   const [totalLabasaWages, setTotalLabasaWages] = useState<number>(0);
   const [totalCashWages, setTotalCashWages] = useState<number>(0);
+  const [totalOnlineWages, setTotalOnlineWages] = useState<number>(0); // Added state for online wages
 
 
   // --- Data Fetching ---
@@ -290,6 +292,7 @@ const CreateWagesPage = () => {
        let runningTotalSuva = 0;
        let runningTotalLabasa = 0;
        let runningTotalCash = 0;
+       let runningTotalOnline = 0; // Added online total calculation
 
        Object.values(calculatedWageMap).forEach(details => {
            if (!details) return;
@@ -303,7 +306,11 @@ const CreateWagesPage = () => {
            runningTotalNet += details.netPay;
            if (details.branch === 'suva') runningTotalSuva += details.netPay;
            if (details.branch === 'labasa') runningTotalLabasa += details.netPay;
-           if (details.paymentMethod === 'cash') runningTotalCash += details.netPay;
+           if (details.paymentMethod === 'cash') {
+               runningTotalCash += details.netPay;
+           } else { // Assuming online if not cash
+                runningTotalOnline += details.netPay;
+           }
        });
 
        setTotalTotalHours(runningTotalTotalHrs);
@@ -317,6 +324,7 @@ const CreateWagesPage = () => {
        setTotalSuvaWages(runningTotalSuva);
        setTotalLabasaWages(runningTotalLabasa);
        setTotalCashWages(runningTotalCash);
+       setTotalOnlineWages(runningTotalOnline); // Set online wages state
 
    }, [calculatedWageMap]);
 
@@ -356,7 +364,6 @@ const CreateWagesPage = () => {
 
   const resetForm = useCallback(() => {
        setDateRange(undefined);
-       setGeneratedApprovalLink(null); // Also reset the generated link
        const initialWageInputs: { [employeeId: string]: WageInputDetails } = {};
        employees.forEach(emp => {
            initialWageInputs[emp.id] = { totalHours: '', hoursWorked: '0', overtimeHours: '0', mealAllowance: '', otherDeductions: '' };
@@ -378,11 +385,14 @@ const CreateWagesPage = () => {
   // --- Event Handlers (Request Approval, Export) ---
   const handleRequestApproval = async () => {
        if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
-          // toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' }); // Removed error toast
-          console.error('Please select a valid date range.'); // Log error
-          return;
-        }
-       setGeneratedApprovalLink(null); // Reset link display
+          console.error('Please select a valid date range before requesting approval.');
+          toast({
+            title: 'Date Range Required',
+            description: 'Please select a valid start and end date before requesting approval.',
+            variant: 'destructive',
+          });
+         return;
+       }
 
        const recordsToRequest = getCurrentWageRecordsForRequest();
        if (recordsToRequest.length === 0) {
@@ -391,30 +401,20 @@ const CreateWagesPage = () => {
          return;
        }
 
-        // Check if records already exist for this date range
-        try {
-           const existingRecords = await checkWageRecordsExistByDateRange(
-               format(dateRange.from, 'yyyy-MM-dd'),
-               format(dateRange.to, 'yyyy-MM-dd')
-            );
-            if (existingRecords) {
-                toast({
-                    title: 'Warning',
-                    description: `Wage records already exist for this period (${format(dateRange.from, 'MMM dd')} - ${format(dateRange.to, 'MMM dd')}). Please delete existing records first if you want to re-request approval.`,
-                    variant: 'destructive',
-                    duration: 8000,
-                });
-                console.log(`Wage records might already exist for this period.`);
-                return; // Stop the process
-            }
-        } catch (checkError: any) {
-           console.error('Error checking for existing wage records:', checkError);
-           toast({
-               title: 'Error',
-               description: `Could not verify existing records: ${checkError.message}`,
-               variant: 'destructive',
-           });
-           return; // Stop the process if check fails
+       // Check if records already exist for this date range
+        const existingRecords = await checkWageRecordsExistByDateRange(
+           format(dateRange.from, 'yyyy-MM-dd'),
+           format(dateRange.to, 'yyyy-MM-dd')
+        );
+        if (existingRecords) {
+            toast({
+                title: 'Warning',
+                description: `Wage records already exist for this period (${format(dateRange.from, 'MMM dd')} - ${format(dateRange.to, 'MMM dd')}). Please delete existing records first if you want to re-request approval.`,
+                variant: 'destructive',
+                duration: 8000,
+            });
+            console.log(`Wage records might already exist for this period.`);
+            return; // Stop the process
         }
 
 
@@ -423,15 +423,18 @@ const CreateWagesPage = () => {
            // Request approval and get the link back
            const { approvalId, approvalLink } = await requestWageApproval(recordsToRequest);
 
-           setGeneratedApprovalLink(approvalLink); // Store the link to display
+           // **Set the link *before* resetting the form**
+           setGeneratedApprovalLink(approvalLink);
+
            toast({
                title: 'Approval Request Created',
                description: `Approval link generated. Please copy and share it. Approval ID: ${approvalId}`,
                duration: 10000, // Show longer
            });
            console.log(`Wage approval request created. Approval ID: ${approvalId}, Link: ${approvalLink}`);
+
            // Optionally reset form parts, maybe keep inputs but clear date? Depends on workflow.
-            resetForm(); // Reset the form after successful request
+           resetForm(); // Reset the form after successful request
 
        } catch (error: any) {
            console.error('Error requesting wage approval:', error);
@@ -440,6 +443,7 @@ const CreateWagesPage = () => {
                description: error.message || 'Failed to create wage approval request.',
                variant: 'destructive',
            });
+           setGeneratedApprovalLink(null); // Ensure link is cleared on error
        } finally {
            setIsSaving(false);
        }
@@ -636,26 +640,25 @@ const CreateWagesPage = () => {
                 )}
 
                 {/* Display generated link if available */}
-                 {generatedApprovalLink && (
-                    <div className="mt-4 p-4 border border-green-500 rounded-lg bg-green-900/30 text-white shadow-md">
-                        <p className="text-base font-semibold mb-2">Approval link generated successfully:</p>
+                {generatedApprovalLink && (
+                    <div className="mt-4 p-4 border border-green-500 rounded-md bg-green-900/30 text-white">
+                        <p className="text-sm mb-2">Approval link generated successfully:</p>
                         <div className="flex items-center gap-2">
                              <Input
                                 type="text"
                                 value={generatedApprovalLink}
                                 readOnly
-                                className="flex-grow bg-gray-700/80 border-gray-600 text-white placeholder-gray-400"
+                                className="flex-grow bg-gray-700 border-gray-600"
                              />
                              <Button
-                                size="default" // Make button slightly larger
+                                size="sm"
                                 onClick={() => copyToClipboard(generatedApprovalLink)}
                                 variant="secondary"
-                                className="bg-white/10 hover:bg-white/20 border border-white/30 text-white"
                              >
-                                <Copy className="mr-2 h-4 w-4"/> Copy
+                                <Copy className="mr-1 h-3 w-3"/> Copy
                              </Button>
                          </div>
-                        <p className="text-sm mt-3 text-gray-300">Please copy this link and share it with the administrator for approval.</p>
+                        <p className="text-xs mt-2 text-gray-400">Please copy this link and send it to the administrator for approval.</p>
                     </div>
                 )}
 
@@ -663,35 +666,36 @@ const CreateWagesPage = () => {
                 <div className="flex flex-wrap justify-center gap-3 mt-6">
                   <Button
                       variant="secondary" size="lg" onClick={handleRequestApproval}
-                      disabled={isSaving || !dateRange?.from || !dateRange?.to || !isValid(dateRange?.from || 0) || !isValid(dateRange?.to || 0) || isLoading} // Disable while loading employees too
+                      disabled={isSaving || !dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to) || isLoading} // Disable while loading employees too
                       className="min-w-[180px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20" // Added styles
                    >
                     {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Requesting...</> : <><Send className="mr-2 h-4 w-4" /> Request Approval</>}
                   </Button>
-                   {/* Remove Export to Excel Button */}
                 </div>
 
                 {/* Branch/Cash Total Display */}
-                <div className="mt-6 pt-4 border-t border-white/20 text-center space-y-1">
-                  <div className="text-md text-gray-300">
-                    Total Suva Branch Wages: <span className="font-semibold text-white">${totalSuvaWages.toFixed(2)}</span>
-                  </div>
-                  <div className="text-md text-gray-300">
-                    Total Labasa Branch Wages: <span className="font-semibold text-white">${totalLabasaWages.toFixed(2)}</span>
-                  </div>
-                  <div className="text-md text-gray-300">
-                    Total Cash Wages: <span className="font-semibold text-white">${totalCashWages.toFixed(2)}</span>
-                  </div>
-                </div>
+                 <div className="mt-6 pt-4 border-t border-white/20 text-center space-y-1">
+                   <div className="text-md text-gray-300">
+                     Total Suva Branch Wages: <span className="font-semibold text-white">${totalSuvaWages.toFixed(2)}</span>
+                   </div>
+                   <div className="text-md text-gray-300">
+                     Total Labasa Branch Wages: <span className="font-semibold text-white">${totalLabasaWages.toFixed(2)}</span>
+                   </div>
+                   <div className="text-md text-gray-300">
+                      Total Online Wages: <span className="font-semibold text-white">${totalOnlineWages.toFixed(2)}</span>
+                   </div>
+                   <div className="text-md text-gray-300">
+                     Total Cash Wages: <span className="font-semibold text-white">${totalCashWages.toFixed(2)}</span>
+                   </div>
+                 </div>
             </CardContent>
           </Card>
         </main>
          {/* Footer handled by RootLayout */}
-         <footer className="w-full text-center py-4 text-xs text-white relative z-10 bg-black/30 backdrop-blur-sm">
-             © {new Date().getFullYear()} Aayush Atishay Lal 北京化工大学
-         </footer>
+
     </div>
   );
 };
 
 export default CreateWagesPage;
+

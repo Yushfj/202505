@@ -628,7 +628,7 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
         console.log(`Successfully saved ${wageRecords.length} associated wage records for approval ${approvalId}.`);
 
         // 3. Generate the approval link using NEXT_PUBLIC_BASE_URL
-        const baseURL = process.env.NEXT_PUBLIC_BASE_URL; // Use env var or fallback
+        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Use env var or fallback
 
          // --- Validation and Warning for NEXT_PUBLIC_BASE_URL ---
          if (!baseURL) {
@@ -1017,9 +1017,3 @@ export const checkWageRecordsExistByDateRange = async (dateFrom: string, dateTo:
     }
 };
 
-// Removed SMS and Email related functions
-// You would integrate with an actual SMS/Email provider here if needed in the future.
-
-
-
-    
