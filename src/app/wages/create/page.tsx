@@ -16,7 +16,7 @@ import {Button} from '@/components/ui/button';
 import {Calendar} from '@/components/ui/calendar';
 import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
 import {cn} from '@/lib/utils';
-import {format, isValid as isDateValid } from 'date-fns'; // Use alias
+import {format, isValid, parseISO} from 'date-fns'; // Use alias for date-fns isValid
 import {CalendarIcon, ArrowLeft, Home, FileDown, FileText, Save, Loader2, Send, Copy} from 'lucide-react'; // Added Send, Copy icons
 import {DateRange} from 'react-day-picker';
 import {
@@ -33,7 +33,7 @@ import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 // Import DB service functions
-import { getEmployees, requestWageApproval, getWageRecords } from '@/services/employee-service'; // Use requestWageApproval
+import { getEmployees, requestWageApproval, getWageRecords, checkWageRecordsExistByDateRange } from '@/services/employee-service'; // Use requestWageApproval, checkWageRecordsExistByDateRange
 import * as XLSX from 'xlsx';
 
 
@@ -58,6 +58,7 @@ interface Employee {
   paymentMethod: 'cash' | 'online';
   branch: 'labasa' | 'suva';
   fnpfEligible: boolean;
+  isActive: boolean; // Added to track active status
 }
 
 // Combined interface for wage input details stored in state
@@ -73,7 +74,7 @@ interface WageInputDetails {
 interface WageRecord {
   id?: string;
   employeeId: string;
-  employeeName: string;
+  employeeName: string; // Denormalized for easier display
   hourlyWage: number;
   totalHours: number;
   hoursWorked: number;
@@ -119,9 +120,6 @@ const CreateWagesPage = () => {
   const [isLoading, setIsLoading] = useState(true); // Loading state for employees
   const [isSaving, setIsSaving] = useState(false); // Saving/Requesting state
   const {toast} = useToast();
-  const [deletePassword, setDeletePassword] = useState(''); // Still used for potential future delete ops?
-  const [showPasswordDialog, setShowPasswordDialog] = useState(false); // Maybe repurposed?
-  const ADMIN_PASSWORD = 'admin01'; // Store securely
   const [generatedApprovalLink, setGeneratedApprovalLink] = useState<string | null>(null); // State to store the generated link
 
   // State for totals
@@ -142,7 +140,8 @@ const CreateWagesPage = () => {
   const fetchEmployeesCallback = useCallback(async () => {
     setIsLoading(true);
     try {
-      const fetchedEmployees = await getEmployees();
+      // Fetch only active employees for wage calculation
+      const fetchedEmployees = await getEmployees(false);
       if (Array.isArray(fetchedEmployees)) {
         setEmployees(fetchedEmployees);
         const initialWageInputs: { [employeeId: string]: WageInputDetails } = {};
@@ -175,18 +174,21 @@ const CreateWagesPage = () => {
 
   // --- Input Handlers ---
   const validateNumericInput = (value: string): string => {
+      // Allow numbers and a single decimal point
       const sanitized = value.replace(/[^0-9.]/g, '');
       const parts = sanitized.split('.');
+      // If more than one decimal point, keep only the first one
       if (parts.length > 2) {
           return parts[0] + '.' + parts.slice(1).join('');
       }
+       // Limit decimal places to 2
       if (parts[1] && parts[1].length > 2) {
           return parts[0] + '.' + parts[1].substring(0, 2);
       }
       return sanitized;
   };
 
-  const handleWageInputChange = (employeeId: string, field: keyof Omit<WageInputDetails, 'totalHours' | 'hoursWorked' | 'overtimeHours'>, value: string) => {
+  const handleWageInputChange = (employeeId: string, field: keyof Pick<WageInputDetails, 'mealAllowance' | 'otherDeductions'>, value: string) => {
     const validatedValue = validateNumericInput(value);
     setWageInputMap(prev => ({
       ...prev,
@@ -244,10 +246,10 @@ const CreateWagesPage = () => {
       const overtimePay = overtimeHours * hourlyWage * OVERTIME_RATE;
       const grossPay = regularPay + overtimePay + mealAllowance; // Gross pay includes meal allowance
 
-      // FNPF is calculated ONLY on regularPay (normal hours pay)
+      // FNPF is calculated ONLY on regularPay (normal hours pay) and only if eligible
       let fnpfDeduction = 0;
       if (employee.fnpfEligible && regularPay > 0) {
-        fnpfDeduction = regularPay * 0.08;
+        fnpfDeduction = regularPay * 0.08; // Fixed 8% FNPF rate
       }
 
       const netPay = Math.max(0, grossPay - fnpfDeduction - otherDeductions);
@@ -320,7 +322,7 @@ const CreateWagesPage = () => {
 
   // --- Helper Functions ---
   const getCurrentWageRecordsForRequest = (): Omit<WageRecord, 'id' | 'approvalId' | 'created_at'>[] => {
-    if (!dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to)) {
+    if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
         console.error('Valid date range missing for wage record generation.');
         return [];
     }
@@ -328,7 +330,8 @@ const CreateWagesPage = () => {
     employees.forEach(employee => {
       const calculatedDetails = calculatedWageMap[employee.id];
       // Ensure calculations are done and values are non-negative before adding
-      if (calculatedDetails && calculatedDetails.totalHours >= 0 && calculatedDetails.mealAllowance >= 0 && calculatedDetails.otherDeductions >= 0) {
+      // Only include records where totalHours > 0 to avoid saving empty entries
+      if (calculatedDetails && calculatedDetails.totalHours > 0 && calculatedDetails.mealAllowance >= 0 && calculatedDetails.otherDeductions >= 0) {
         records.push({
           employeeId: calculatedDetails.employeeId,
           employeeName: calculatedDetails.employeeName,
@@ -344,6 +347,8 @@ const CreateWagesPage = () => {
           dateFrom: format(dateRange.from!, 'yyyy-MM-dd'),
           dateTo: format(dateRange.to!, 'yyyy-MM-dd'),
         });
+      } else if (calculatedDetails && calculatedDetails.totalHours <= 0) {
+          console.log(`Skipping record for ${calculatedDetails.employeeName} as total hours are 0 or less.`);
       }
     });
     return records;
@@ -372,23 +377,46 @@ const CreateWagesPage = () => {
 
   // --- Event Handlers (Request Approval, Export) ---
   const handleRequestApproval = async () => {
-       if (!dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to)) {
-          console.error('Please select a valid date range before requesting approval.');
-          toast({
-            title: 'Date Range Required',
-            description: 'Please select a valid start and end date before requesting approval.',
-            variant: 'destructive',
-          });
-         return;
-       }
+       if (!dateRange?.from || !dateRange?.to || !isValid(dateRange.from) || !isValid(dateRange.to)) {
+          // toast({ title: 'Error', description: 'Please select a valid date range.', variant: 'destructive' }); // Removed error toast
+          console.error('Please select a valid date range.'); // Log error
+          return;
+        }
        setGeneratedApprovalLink(null); // Reset link display
 
        const recordsToRequest = getCurrentWageRecordsForRequest();
        if (recordsToRequest.length === 0) {
-         toast({ title: 'Info', description: 'No valid wage data calculated to request approval.', variant: 'default' });
+         toast({ title: 'Info', description: 'No valid wage data calculated to request approval (ensure total hours > 0).', variant: 'default' });
          console.log('No valid wage data calculated to request approval.');
          return;
        }
+
+        // Check if records already exist for this date range
+        try {
+           const existingRecords = await checkWageRecordsExistByDateRange(
+               format(dateRange.from, 'yyyy-MM-dd'),
+               format(dateRange.to, 'yyyy-MM-dd')
+            );
+            if (existingRecords) {
+                toast({
+                    title: 'Warning',
+                    description: `Wage records already exist for this period (${format(dateRange.from, 'MMM dd')} - ${format(dateRange.to, 'MMM dd')}). Please delete existing records first if you want to re-request approval.`,
+                    variant: 'destructive',
+                    duration: 8000,
+                });
+                console.log(`Wage records might already exist for this period.`);
+                return; // Stop the process
+            }
+        } catch (checkError: any) {
+           console.error('Error checking for existing wage records:', checkError);
+           toast({
+               title: 'Error',
+               description: `Could not verify existing records: ${checkError.message}`,
+               variant: 'destructive',
+           });
+           return; // Stop the process if check fails
+        }
+
 
        setIsSaving(true); // Use isSaving state for the loading indicator
        try {
@@ -403,7 +431,7 @@ const CreateWagesPage = () => {
            });
            console.log(`Wage approval request created. Approval ID: ${approvalId}, Link: ${approvalLink}`);
            // Optionally reset form parts, maybe keep inputs but clear date? Depends on workflow.
-           // resetForm(); // Uncomment if full reset is desired
+            resetForm(); // Reset the form after successful request
 
        } catch (error: any) {
            console.error('Error requesting wage approval:', error);
@@ -416,138 +444,6 @@ const CreateWagesPage = () => {
            setIsSaving(false);
        }
      };
-
-    const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
-        if (!dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to)) {
-            console.error('Please select a valid date range before exporting.'); // Log error
-            toast({
-              title: 'Date Range Required',
-              description: 'Please select a valid date range before exporting.',
-              variant: 'destructive',
-            });
-            return;
-        }
-
-        const recordsToExport = Object.values(calculatedWageMap)
-            .filter(Boolean) as CalculatedWageInfo[];
-
-        if (recordsToExport.length === 0) {
-            toast({ title: 'Info', description: 'No valid wage records calculated to export.', variant: 'default' }); // Changed to info
-            console.log('No valid wage records calculated to export.'); // Log info
-            return;
-        }
-
-        const fileNameBase = `wage_records_${format(dateRange.from, 'yyyyMMdd')}_${format(dateRange.to, 'yyyyMMdd')}`;
-
-        if (formatType === 'BSP' || formatType === 'BRED') {
-             const onlineTransferRecords = recordsToExport.filter(record => record.paymentMethod === 'online');
-            if (onlineTransferRecords.length === 0) {
-                toast({ title: 'Info', description: `No online transfer employees for ${formatType} export.`, variant: 'default' });
-                console.log(`No online transfer employees for ${formatType} export.`);
-                return;
-            }
-
-            let csvData = '';
-            let fileName = `${fileNameBase}_${formatType}.csv`;
-
-            if (formatType === 'BSP') {
-                const csvRows: string[] = []; // No headers for BSP
-                onlineTransferRecords.forEach(record => {
-                    csvRows.push([
-                        record.bankCode || '',
-                        record.bankAccountNumber || '',
-                        record.netPay.toFixed(2),
-                        'Salary', // Adding "Salary" to the fourth column
-                        record.employeeName, // Adding employee name to the fifth column
-                    ].join(','));
-                });
-                csvData = csvRows.join('\n');
-            } else { // BRED format
-                const csvRows = [
-                    // No headers for BRED as per spec
-                    // ['BIC', 'Employee', 'Employee', 'Account N', 'Amount', 'Purpose of Note (optional)'].join(',')
-                ];
-                onlineTransferRecords.forEach(record => {
-                    csvRows.push([
-                        record.bankCode || '',
-                        record.employeeName,
-                        '', // Empty Employee 2 Column
-                        record.bankAccountNumber || '',
-                        record.netPay.toFixed(2),
-                        'Salary',
-                    ].join(','));
-                });
-                csvData = csvRows.join('\n');
-            }
-
-            const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', fileName);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
-            console.log(`Wage records exported to CSV (${formatType}) successfully!`);
-
-        } else if (formatType === 'Excel') {
-            const excelData = [
-                [ // Headers
-                    'Employee Name', 'Bank Code', 'Account #', 'Hourly Wage',
-                    'Total Hours', 'Normal Hours', 'O/T Hours', 'Meal Allowance',
-                    'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
-                    'Date From', 'Date To', 'FNPF Eligible', 'Branch', 'Payment Method'
-                ],
-                ...recordsToExport.map(record => [ // Data rows
-                    record.employeeName,
-                    record.bankCode || 'N/A',
-                    record.bankAccountNumber || 'N/A',
-                    record.hourlyWage.toFixed(2),
-                    record.totalHours.toFixed(2),
-                    record.hoursWorked.toFixed(2),
-                    record.overtimeHours.toFixed(2),
-                    record.mealAllowance.toFixed(2),
-                    record.fnpfEligible ? record.fnpfDeduction.toFixed(2) : 'N/A', // Display based on eligibility
-                    record.otherDeductions.toFixed(2),
-                    record.grossPay.toFixed(2),
-                    record.netPay.toFixed(2),
-                    format(dateRange.from!, 'yyyy-MM-dd'),
-                    format(dateRange.to!, 'yyyy-MM-dd'),
-                    record.fnpfEligible ? 'Yes' : 'No',
-                    record.branch,
-                    record.paymentMethod,
-                ]),
-                 [ // Totals row
-                     'Totals', '', '', '', // Spacers for text columns
-                     totalTotalHours.toFixed(2), // Total Total Hours
-                     totalHoursWorked.toFixed(2), // Total Normal Hours
-                     totalOvertimeHours.toFixed(2), // Total O/T Hours
-                     totalMealAllowance.toFixed(2), // Total Meal Allowance
-                     totalFnpfDeduction.toFixed(2), // Total FNPF
-                     totalOtherDeductions.toFixed(2), // Total Other Deductions
-                     totalGrossPay.toFixed(2), // Total Gross Pay
-                     totalNetPay.toFixed(2), // Total Net Pay
-                     '', '', '', '', '' // Spacers for date/text columns
-                 ],
-            ];
-
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-             // Set column widths (optional, adjust as needed)
-            ws['!cols'] = [
-              {wch: 20}, {wch: 10}, {wch: 15}, {wch: 12}, // Emp Name, Bank Code, Acc #, Wage
-              {wch: 12}, {wch: 12}, {wch: 12}, {wch: 14}, // Total Hrs, Normal Hrs, OT Hrs, Meal
-              {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, // FNPF, Other Ded, Gross, Net
-              {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10}, {wch: 12} // Dates, Eligible, Branch, Payment
-            ];
-            XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
-            XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
-            toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' });
-            console.log('Wage records exported to Excel successfully!');
-        }
-    };
 
   // --- Render ---
   return (
@@ -585,8 +481,8 @@ const CreateWagesPage = () => {
                                 )}
                             >
                                 <CalendarIcon className="mr-2 h-4 w-4" />
-                                {dateRange?.from && isDateValid(dateRange.from) ? (
-                                    dateRange.to && isDateValid(dateRange.to) ? (
+                                {dateRange?.from && isValid(dateRange.from) ? (
+                                    dateRange.to && isValid(dateRange.to) ? (
                                         `${format(dateRange.from, 'LLL dd, yyyy')} - ${format(dateRange.to, 'LLL dd, yyyy')}`
                                     ) : (
                                         format(dateRange.from, 'LLL dd, yyyy')
@@ -604,7 +500,7 @@ const CreateWagesPage = () => {
                                  selected={dateRange}
                                  onSelect={setDateRange}
                                  numberOfMonths={1}
-                                 disabled={isLoading} // Disable calendar while loading employees
+                                 disabled={isLoading || isSaving} // Disable calendar while loading employees or saving
                              />
                          </PopoverContent>
                     </Popover>
@@ -616,7 +512,7 @@ const CreateWagesPage = () => {
                        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading employees...
                     </div>
                 ) : employees.length === 0 ? (
-                    <div className="text-center text-gray-400 py-10">No employees found. Please add employees first.</div>
+                    <div className="text-center text-gray-400 py-10">No active employees found. Please add employees first.</div>
                 ) : (
                     <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
                     <Table>
@@ -640,7 +536,7 @@ const CreateWagesPage = () => {
                            {employees.map(employee => {
                                 const calcDetails = calculatedWageMap[employee.id];
                                 const displayWage = calcDetails ? calcDetails.hourlyWage.toFixed(2) : (parseFloat(employee.hourlyWage) || 0).toFixed(2);
-                                const displayFNPFDeduct = calcDetails?.fnpfEligible ? `$${(calcDetails.fnpfDeduction || 0).toFixed(2)}` : 'N/A';
+                                const displayFNPFDeduct = employee?.fnpfEligible ? `$${(calcDetails?.fnpfDeduction || 0).toFixed(2)}` : 'N/A';
                                 const displayGrossPay = calcDetails ? `$${(calcDetails.grossPay || 0).toFixed(2)}` : '$0.00';
                                 const displayNetPay = calcDetails ? `$${(calcDetails.netPay || 0).toFixed(2)}` : '$0.00';
                                 const displayBankCode = employee.paymentMethod === 'online' ? (employee.bankCode || 'N/A') : 'Cash';
@@ -656,12 +552,12 @@ const CreateWagesPage = () => {
                                         <TableCell className="text-white border-r border-white/20 text-right">${displayWage}</TableCell>
                                         <TableCell className="border-r border-white/20">
                                             <Input
-                                                type="text"
+                                                type="text" // Use text to allow better validation handling
                                                 placeholder="Total"
                                                 value={wageInputMap[employee.id]?.totalHours || ''}
                                                 onChange={e => handleTotalHoursChange(employee.id, e.target.value)}
                                                 className="w-16 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right"
-                                                inputMode="decimal"
+                                                inputMode="decimal" // Helps mobile keyboards
                                                 disabled={isSaving} // Disable input while saving/requesting
                                             />
                                         </TableCell>
@@ -673,7 +569,7 @@ const CreateWagesPage = () => {
                                         </TableCell>
                                         <TableCell className="border-r border-white/20">
                                             <Input
-                                                 type="text"
+                                                 type="text" // Use text for validation
                                                  placeholder="Amt"
                                                  value={wageInputMap[employee.id]?.mealAllowance || ''}
                                                  onChange={e => handleWageInputChange(employee.id, 'mealAllowance', e.target.value)}
@@ -684,7 +580,7 @@ const CreateWagesPage = () => {
                                         </TableCell>
                                         <TableCell className="border-r border-white/20">
                                             <Input
-                                                 type="text"
+                                                 type="text" // Use text for validation
                                                  placeholder="Amt"
                                                  value={wageInputMap[employee.id]?.otherDeductions || ''}
                                                  onChange={e => handleWageInputChange(employee.id, 'otherDeductions', e.target.value)}
@@ -740,62 +636,39 @@ const CreateWagesPage = () => {
                 )}
 
                 {/* Display generated link if available */}
-                {generatedApprovalLink && (
-                    <div className="mt-4 p-4 border border-green-500 rounded-md bg-green-900/30 text-white">
-                        <p className="text-sm mb-2">Approval link generated successfully:</p>
+                 {generatedApprovalLink && (
+                    <div className="mt-4 p-4 border border-green-500 rounded-lg bg-green-900/30 text-white shadow-md">
+                        <p className="text-base font-semibold mb-2">Approval link generated successfully:</p>
                         <div className="flex items-center gap-2">
                              <Input
                                 type="text"
                                 value={generatedApprovalLink}
                                 readOnly
-                                className="flex-grow bg-gray-700 border-gray-600"
+                                className="flex-grow bg-gray-700/80 border-gray-600 text-white placeholder-gray-400"
                              />
                              <Button
-                                size="sm"
+                                size="default" // Make button slightly larger
                                 onClick={() => copyToClipboard(generatedApprovalLink)}
                                 variant="secondary"
+                                className="bg-white/10 hover:bg-white/20 border border-white/30 text-white"
                              >
-                                <Copy className="mr-1 h-3 w-3"/> Copy
+                                <Copy className="mr-2 h-4 w-4"/> Copy
                              </Button>
                          </div>
-                        <p className="text-xs mt-2 text-gray-400">Please copy this link and send it to the administrator for approval.</p>
+                        <p className="text-sm mt-3 text-gray-300">Please copy this link and share it with the administrator for approval.</p>
                     </div>
                 )}
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap justify-center gap-3 mt-6">
-                   {/* Changed Save button to Request Approval */}
                   <Button
                       variant="secondary" size="lg" onClick={handleRequestApproval}
-                      disabled={isSaving || !dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to) || isLoading} // Disable while loading employees too
+                      disabled={isSaving || !dateRange?.from || !dateRange?.to || !isValid(dateRange?.from || 0) || !isValid(dateRange?.to || 0) || isLoading} // Disable while loading employees too
                       className="min-w-[180px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20" // Added styles
                    >
                     {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Requesting...</> : <><Send className="mr-2 h-4 w-4" /> Request Approval</>}
                   </Button>
-                  <Button
-                     variant="secondary"
-                     size="lg"
-                     onClick={() => handleExport('BSP')}
-                     disabled={!dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to) || isLoading} // Disable export when loading/no data
-                     className="min-w-[150px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20">
-                     <FileDown className="mr-2 h-4 w-4" /> Export CSV (BSP)
-                  </Button>
-                  <Button
-                     variant="secondary"
-                     size="lg"
-                     onClick={() => handleExport('BRED')}
-                     disabled={!dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to) || isLoading} // Disable export when loading/no data
-                     className="min-w-[150px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20">
-                     <FileDown className="mr-2 h-4 w-4" /> Export CSV (BRED)
-                  </Button>
-                   <Button
-                     variant="secondary"
-                     size="lg"
-                     onClick={() => handleExport('Excel')}
-                     disabled={!dateRange?.from || !dateRange?.to || !isDateValid(dateRange.from) || !isDateValid(dateRange.to) || isLoading} // Disable export when loading/no data
-                     className="min-w-[150px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20">
-                     <FileText className="mr-2 h-4 w-4" /> Export to Excel
-                  </Button>
+                   {/* Remove Export to Excel Button */}
                 </div>
 
                 {/* Branch/Cash Total Display */}
@@ -814,6 +687,9 @@ const CreateWagesPage = () => {
           </Card>
         </main>
          {/* Footer handled by RootLayout */}
+         <footer className="w-full text-center py-4 text-xs text-white relative z-10 bg-black/30 backdrop-blur-sm">
+             © {new Date().getFullYear()} Aayush Atishay Lal 北京化工大学
+         </footer>
     </div>
   );
 };

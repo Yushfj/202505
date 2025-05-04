@@ -6,8 +6,6 @@ import { query, getDbPool } from '@/lib/db';
 import { format, isValid as isDateValid, parseISO } from 'date-fns';
 import { randomBytes } from 'crypto';
 // import nodemailer from 'nodemailer'; // Removed Nodemailer import
-// const http = require('https'); // Removed http import
-// import 'dotenv/config'; // Removed dotenv import
 
 // --- Interfaces ---
 // Define the structure for an Employee object
@@ -630,12 +628,12 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
         console.log(`Successfully saved ${wageRecords.length} associated wage records for approval ${approvalId}.`);
 
         // 3. Generate the approval link using NEXT_PUBLIC_BASE_URL
-        const baseURL = process.env.NEXT_PUBLIC_BASE_URL; // Read base URL from env
+        const baseURL = process.env.NEXT_PUBLIC_BASE_URL; // Use env var or fallback
 
          // --- Validation and Warning for NEXT_PUBLIC_BASE_URL ---
          if (!baseURL) {
-            console.error("CRITICAL: NEXT_PUBLIC_BASE_URL environment variable is not set. Approval links will not work correctly in deployment. Please set it in your .env file (for local development) and in your Railway environment variables (for deployment) to your deployed application's public URL (e.g., https://your-app-name.railway.app).");
-            throw new Error("Application base URL (NEXT_PUBLIC_BASE_URL) is not configured. Cannot generate approval link.");
+            console.error("CRITICAL: NEXT_PUBLIC_BASE_URL environment variable is not set. Approval links will not work correctly in deployment. Please set it in your .env file (for local development) and in your Railway environment variables (for deployment) to your deployed application's public URL (e.g., https://your-app-name.railway.app). Using fallback: http://localhost:9002");
+            // throw new Error("Application base URL (NEXT_PUBLIC_BASE_URL) is not configured. Cannot generate approval link.");
          } else if (baseURL === 'http://localhost:9002' && process.env.NODE_ENV === 'production') {
              console.warn("WARNING: NEXT_PUBLIC_BASE_URL is set to a localhost address in a production environment. Approval links will likely not work for external users. Ensure NEXT_PUBLIC_BASE_URL is set to the public URL of your deployed application in your hosting environment (e.g., Railway).");
          } else if (!baseURL.startsWith('http://') && !baseURL.startsWith('https://')) {
@@ -900,20 +898,6 @@ export const getPayPeriodSummaries = async (status: 'pending' | 'approved' | 'de
   }
 };
 
-// Function to check if wage records exist for a specific approval ID
-export const checkWageRecordsExist = async (approvalId: string): Promise<boolean> => {
-    try {
-        const result = await query(
-            `SELECT 1 FROM wage_records WHERE approval_id = $1 LIMIT 1;`,
-            [approvalId]
-        );
-        return result.rowCount > 0;
-    } catch (error: any) {
-        console.error(`Error checking if wage records exist for approval ${approvalId}:`, error);
-        throw new Error(`Failed to check wage records existence. DB Error: ${error.message || 'Unknown error'}`);
-    }
-};
-
 
 /**
  * Fetches wage records from the database, optionally filtered by date range and approval status.
@@ -925,7 +909,8 @@ export const checkWageRecordsExist = async (approvalId: string): Promise<boolean
 export const getWageRecords = async (
     filterDateFrom: Date | string | null = null, // Allow string input
     filterDateTo: Date | string | null = null,   // Allow string input
-    approvalStatus: 'pending' | 'approved' | 'declined' | null = null // Allow fetching all if null
+    approvalStatus: 'pending' | 'approved' | 'declined' | null = null, // Allow fetching all if null
+    approvalId: string | null = null // Optional: Filter by specific approval ID
 ): Promise<WageRecord[]> => {
   let queryString = `
     SELECT
@@ -967,18 +952,24 @@ export const getWageRecords = async (
    const formattedDateFrom = formatDateForQuery(filterDateFrom);
    const formattedDateTo = formatDateForQuery(filterDateTo);
 
-   if (formattedDateFrom) {
-       conditions.push(`wr.date_from >= $${queryParams.length + 1}::date`);
-       queryParams.push(formattedDateFrom);
+    if (approvalId) {
+       conditions.push(`wr.approval_id = $${queryParams.length + 1}`);
+       queryParams.push(approvalId);
+   } else {
+        // Only apply date and status filters if not filtering by approval ID
+        if (formattedDateFrom) {
+            conditions.push(`wr.date_from >= $${queryParams.length + 1}::date`);
+            queryParams.push(formattedDateFrom);
+        }
+        if (formattedDateTo) {
+            conditions.push(`wr.date_to <= $${queryParams.length + 1}::date`);
+            queryParams.push(formattedDateTo);
+        }
+        if (approvalStatus) {
+            conditions.push(`wa.status = $${queryParams.length + 1}`);
+            queryParams.push(approvalStatus);
+        }
    }
-   if (formattedDateTo) {
-       conditions.push(`wr.date_to <= $${queryParams.length + 1}::date`);
-       queryParams.push(formattedDateTo);
-   }
-  if (approvalStatus) {
-      conditions.push(`wa.status = $${queryParams.length + 1}`);
-      queryParams.push(approvalStatus);
-  }
 
   if (conditions.length > 0) {
       queryString += ' WHERE ' + conditions.join(' AND ');
@@ -1006,3 +997,29 @@ export const getWageRecords = async (
     throw error;
   }
 };
+
+/**
+ * Checks if wage records exist for a specific date range.
+ * @param {string} dateFrom - Start date in YYYY-MM-DD format.
+ * @param {string} dateTo - End date in YYYY-MM-DD format.
+ * @returns {Promise<boolean>} True if records exist for the period, false otherwise.
+ */
+export const checkWageRecordsExistByDateRange = async (dateFrom: string, dateTo: string): Promise<boolean> => {
+    try {
+        const result = await query(
+            `SELECT 1 FROM wage_records WHERE date_from = $1::date AND date_to = $2::date LIMIT 1;`,
+            [dateFrom, dateTo]
+        );
+        return result.rowCount > 0;
+    } catch (error: any) {
+        console.error(`Error checking if wage records exist for ${dateFrom} to ${dateTo}:`, error);
+        throw new Error(`Failed to check wage records existence. DB Error: ${error.message || 'Unknown error'}`);
+    }
+};
+
+// Removed SMS and Email related functions
+// You would integrate with an actual SMS/Email provider here if needed in the future.
+
+
+
+    

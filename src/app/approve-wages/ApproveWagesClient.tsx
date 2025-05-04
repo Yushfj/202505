@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getWagesForApproval, updateWageApprovalStatus, type WageRecord, type WageApproval } from '@/services/employee-service';
+import { getWagesForApproval, updateWageApprovalStatus, type WageRecord, type WageApproval, getEmployees, type Employee } from '@/services/employee-service'; // Import Employee and getEmployees
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -19,11 +19,12 @@ const ApproveWagesClient = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isProcessing, setIsProcessing] = useState(false);
     const [approvalData, setApprovalData] = useState<{ approval: WageApproval; records: WageRecord[] } | null>(null);
+    const [allEmployees, setAllEmployees] = useState<Employee[]>([]); // State to store all employees
     const [error, setError] = useState<string | null>(null);
     const [decision, setDecision] = useState<'approved' | 'declined' | null>(null); // Track final decision
 
     useEffect(() => {
-        const fetchApprovalData = async () => {
+        const fetchInitialData = async () => {
             if (!token) {
                 setError('Invalid approval link: Missing token.');
                 setIsLoading(false);
@@ -33,25 +34,32 @@ const ApproveWagesClient = () => {
             setIsLoading(true);
             setError(null);
             try {
-                const data = await getWagesForApproval(token);
+                // Fetch employees and approval data concurrently
+                const [employeesData, data] = await Promise.all([
+                    getEmployees(true), // Fetch all employees (active and inactive)
+                    getWagesForApproval(token)
+                ]);
+
+                setAllEmployees(employeesData);
+
                 if (!data) {
                     setError('Approval request not found or already processed.');
                 } else if (data.approval.status !== 'pending') {
                      setError(`This request has already been ${data.approval.status}.`);
                      setDecision(data.approval.status); // Show final status
+                     setApprovalData(data); // Still set data to show details
                 } else {
                     setApprovalData(data);
                 }
             } catch (err: any) {
-                console.error("Error fetching approval data:", err);
-                // Provide a more user-friendly error based on common DB issues
+                console.error("Error fetching initial data:", err);
                 let userErrorMessage = 'Failed to load approval details.';
                  if (err.message?.includes('password authentication failed')) {
                      userErrorMessage = 'Database connection failed. Please contact support.';
                  } else if (err.message?.includes('table not found')) {
                     userErrorMessage = 'Database error: Required table missing. Please contact support.';
                  } else if (err.message?.includes('Failed to fetch wages for approval')) {
-                    userErrorMessage = err.message; // Show the specific message from the service
+                    userErrorMessage = err.message;
                  }
                  setError(userErrorMessage);
             } finally {
@@ -59,7 +67,7 @@ const ApproveWagesClient = () => {
             }
         };
 
-        fetchApprovalData();
+        fetchInitialData();
     }, [token]);
 
     const handleDecision = async (newStatus: 'approved' | 'declined') => {
@@ -111,19 +119,24 @@ const ApproveWagesClient = () => {
                     <AlertTriangle className="h-10 w-10 mx-auto mb-3" />
                     <p className="text-xl font-semibold">Error Loading Approval</p>
                     <p className="text-base">{error}</p>
-                     {/* Optionally add a link back or instructions */}
                      <p className="text-sm mt-4 text-muted-foreground">If the problem persists, please contact support.</p>
                 </div>
             );
         }
 
         if (!approvalData) {
-             // Should be covered by error state, but as a fallback
              return <div className="text-center py-10">Approval data not available.</div>;
          }
 
         const { approval, records } = approvalData;
-        const totalNetPay = records.reduce((sum, r) => sum + r.netPay, 0);
+
+        // Filter records to show only online payment methods
+        const employeePaymentMethodMap = new Map(allEmployees.map(emp => [emp.id, emp.paymentMethod]));
+        const onlineTransferRecords = records.filter(record =>
+            employeePaymentMethodMap.get(record.employeeId) === 'online'
+        );
+
+        const totalNetPay = onlineTransferRecords.reduce((sum, r) => sum + r.netPay, 0);
         const isFinalState = approval.status === 'approved' || approval.status === 'declined';
 
         // Format dates safely
@@ -139,52 +152,58 @@ const ApproveWagesClient = () => {
         return (
             <>
                 <CardHeader>
-                    <CardTitle className="text-2xl text-center">Wage Approval Request</CardTitle>
+                    <CardTitle className="text-2xl text-center">Wage Approval Request (Online Transfers Only)</CardTitle>
                     <CardDescription className="text-center">
                         Period: {formattedDateFrom} - {formattedDateTo} <br />
-                        Total Net Pay: ${totalNetPay.toFixed(2)} <br />
+                        Total Net Pay (Online): ${totalNetPay.toFixed(2)} <br />
                         Current Status: <span className={`font-semibold ${approval.status === 'pending' ? 'text-orange-500' : approval.status === 'approved' ? 'text-green-500' : 'text-red-500'}`}>{approval.status.toUpperCase()}</span>
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="overflow-x-auto mb-6 border rounded-lg">
-                        <Table>
-                            <TableHeader className="bg-muted/50">
-                                <TableRow>
-                                    <TableHead>Employee</TableHead>
-                                    <TableHead className="text-right">Wage</TableHead>
-                                    <TableHead className="text-right">Total Hrs</TableHead>
-                                    <TableHead className="text-right">Normal Hrs</TableHead>
-                                    <TableHead className="text-right">O/T Hrs</TableHead>
-                                    <TableHead className="text-right">Meal</TableHead>
-                                    <TableHead className="text-right">FNPF</TableHead>
-                                    <TableHead className="text-right">Deduct</TableHead>
-                                    <TableHead className="text-right">Gross</TableHead>
-                                    <TableHead className="text-right">Net Pay</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {records.map(record => (
-                                    <TableRow key={record.id}>
-                                        <TableCell>{record.employeeName}</TableCell>
-                                        <TableCell className="text-right">${record.hourlyWage.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">{record.totalHours.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">{record.hoursWorked.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">{record.overtimeHours.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">${record.mealAllowance.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">${record.fnpfDeduction.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">${record.otherDeductions.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right">${record.grossPay.toFixed(2)}</TableCell>
-                                        <TableCell className="text-right font-medium">${record.netPay.toFixed(2)}</TableCell>
+                    {onlineTransferRecords.length === 0 ? (
+                         <div className="text-center py-6 text-muted-foreground">
+                            No employees with online payment method found for this period.
+                         </div>
+                    ) : (
+                        <div className="overflow-x-auto mb-6 border rounded-lg">
+                            <Table>
+                                <TableHeader className="bg-muted/50">
+                                    <TableRow>
+                                        <TableHead>Employee</TableHead>
+                                        <TableHead className="text-right">Wage</TableHead>
+                                        <TableHead className="text-right">Total Hrs</TableHead>
+                                        <TableHead className="text-right">Normal Hrs</TableHead>
+                                        <TableHead className="text-right">O/T Hrs</TableHead>
+                                        <TableHead className="text-right">Meal</TableHead>
+                                        <TableHead className="text-right">FNPF</TableHead>
+                                        <TableHead className="text-right">Deduct</TableHead>
+                                        <TableHead className="text-right">Gross</TableHead>
+                                        <TableHead className="text-right">Net Pay</TableHead>
                                     </TableRow>
-                                ))}
-                                <TableRow className="font-bold bg-muted/50">
-                                     <TableCell colSpan={9} className="text-right">Total Net Pay:</TableCell>
-                                     <TableCell className="text-right">${totalNetPay.toFixed(2)}</TableCell>
-                                </TableRow>
-                            </TableBody>
-                        </Table>
-                    </div>
+                                </TableHeader>
+                                <TableBody>
+                                    {onlineTransferRecords.map(record => (
+                                        <TableRow key={record.id}>
+                                            <TableCell>{record.employeeName}</TableCell>
+                                            <TableCell className="text-right">${record.hourlyWage.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">{record.totalHours.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">{record.hoursWorked.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">{record.overtimeHours.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">${record.mealAllowance.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">${record.fnpfDeduction.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">${record.otherDeductions.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right">${record.grossPay.toFixed(2)}</TableCell>
+                                            <TableCell className="text-right font-medium">${record.netPay.toFixed(2)}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                    <TableRow className="font-bold bg-muted/50">
+                                         <TableCell colSpan={9} className="text-right">Total Net Pay (Online):</TableCell>
+                                         <TableCell className="text-right">${totalNetPay.toFixed(2)}</TableCell>
+                                    </TableRow>
+                                </TableBody>
+                            </Table>
+                        </div>
+                     )}
 
                     {/* Show buttons only if status is pending and no final decision made locally */}
                     {approval.status === 'pending' && !decision && (
@@ -237,3 +256,5 @@ const ApproveWagesClient = () => {
 };
 
 export default ApproveWagesClient;
+
+    

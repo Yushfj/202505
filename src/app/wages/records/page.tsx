@@ -46,7 +46,6 @@ const WagesRecordsPage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isResending, setIsResending] = useState(false); // State for resend loading (can be removed if resend is gone)
   const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null); // ID of the period selected for details/actions
   const [selectedStatus, setSelectedStatus] = useState<'approved' | 'declined' | 'pending'>('approved'); // Track current tab status
   const [deletePassword, setDeletePassword] = useState('');
@@ -93,9 +92,10 @@ const WagesRecordsPage = () => {
       if (!approvalId) return;
       setIsLoading(true); // Indicate loading details
       try {
-          // Fetch records specifically for this approval ID
-          const allRecordsForStatus = await getWageRecords(null, null, selectedStatus); // Fetch records for the current status
-          const periodRecords = allRecordsForStatus.filter(r => r.approvalId === approvalId); // Filter client-side
+          // Fetch records specifically for this approval ID using getWageRecords
+          // Pass null for dates and the specific status (which is 'approved' in this case)
+          const periodRecords = await getWageRecords(null, null, null, approvalId); // Fetch regardless of status
+
 
           // Ensure dates are strings in YYYY-MM-DD format
           const parsedRecords = periodRecords.map(record => {
@@ -122,7 +122,7 @@ const WagesRecordsPage = () => {
       } finally {
           setIsLoading(false);
       }
-  }, [toast, selectedStatus]); // Add selectedStatus dependency
+  }, [toast]); // Removed selectedStatus dependency as we fetch based on approvalId now
 
   // --- Event Handlers ---
   const handlePeriodSelect = (approvalId: string) => {
@@ -132,12 +132,8 @@ const WagesRecordsPage = () => {
         setSelectedPeriodRecords([]);
     } else {
         setSelectedApprovalId(approvalId);
-        // Only fetch details if the current tab is 'approved'
-        if (selectedStatus === 'approved') {
-            fetchPeriodDetails(approvalId);
-        } else {
-             setSelectedPeriodRecords([]); // Clear details for non-approved tabs for now
-        }
+        // Fetch details regardless of the current tab, as selection implies viewing details
+        fetchPeriodDetails(approvalId);
     }
   };
 
@@ -197,148 +193,148 @@ const WagesRecordsPage = () => {
   // Function to generate the approval link
   const generateApprovalLink = (token: string | undefined): string | null => {
     if (!token) return null;
-    const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
-    return `${baseURL}/approve-wages?token=${token}`;
+    // Use the environment variable for the base URL
+    const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Fallback to localhost if not set
+    // Ensure baseURL doesn't end with a slash and the path doesn't start with one
+    const cleanBaseURL = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL;
+    const path = 'approve-wages';
+    return `${cleanBaseURL}/${path}?token=${token}`;
   };
 
   // --- Export Functions ---
-  const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
-    if (!selectedApprovalId) {
-      toast({ title: 'Error', description: 'Please select an approved pay period to export.', variant: 'destructive' });
-      console.error('Please select an approved pay period to export.');
-      return;
-    }
-     if (selectedStatus !== 'approved') {
-         toast({ title: 'Info', description: 'Export is only available for approved records.', variant: 'default' });
-         return;
+   const handleExport = (formatType: 'BSP' | 'BRED' | 'Excel') => {
+     if (!selectedApprovalId) {
+       toast({ title: 'Error', description: 'Please select an approved pay period to export.', variant: 'destructive' });
+       console.error('Please select an approved pay period to export.');
+       return;
      }
 
-    // Use the currently loaded selectedPeriodRecords
-    const recordsToExport = selectedPeriodRecords;
+     const recordsToExport = selectedPeriodRecords;
 
-    if (recordsToExport.length === 0) {
-      toast({ title: 'Info', description: 'No records to export for this period.', variant: 'default' });
-      console.log('No records to export for this period.');
-      return;
-    }
-
-    const selectedGroup = payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId);
-     if (!selectedGroup) {
-         toast({ title: 'Error', description: 'Could not find selected period details.', variant: 'destructive' });
-         console.error('Could not find selected period details.');
-         return;
+     if (recordsToExport.length === 0) {
+       toast({ title: 'Info', description: 'No records to export for this period.', variant: 'default' });
+       console.log('No records to export for this period.');
+       return;
      }
-    // Use parseISO to handle YYYY-MM-DD strings, then format
-    const dateFromStr = isDateValid(parseISO(selectedGroup.dateFrom)) ? format(parseISO(selectedGroup.dateFrom), 'yyyyMMdd') : 'invalid_date';
-    const dateToStr = isDateValid(parseISO(selectedGroup.dateTo)) ? format(parseISO(selectedGroup.dateTo), 'yyyyMMdd') : 'invalid_date';
-    const fileNameBase = `wage_records_${dateFromStr}_${dateToStr}`;
+
+      const selectedGroup = [...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending].find(g => g.approvalId === selectedApprovalId);
+
+      if (!selectedGroup) {
+          toast({ title: 'Error', description: 'Could not find selected period details.', variant: 'destructive' });
+          console.error('Could not find selected period details.');
+          return;
+      }
+
+     // Use parseISO to handle YYYY-MM-DD strings, then format
+     const dateFromStr = isDateValid(parseISO(selectedGroup.dateFrom)) ? format(parseISO(selectedGroup.dateFrom), 'yyyyMMdd') : 'invalid_date';
+     const dateToStr = isDateValid(parseISO(selectedGroup.dateTo)) ? format(parseISO(selectedGroup.dateTo), 'yyyyMMdd') : 'invalid_date';
+     const fileNameBase = `wage_records_${dateFromStr}_${dateToStr}`;
+
+     if (formatType === 'BSP' || formatType === 'BRED') {
+         const onlineTransferRecords = recordsToExport.filter(record => {
+             const employee = employees.find(emp => emp.id === record.employeeId);
+             return employee?.paymentMethod === 'online';
+         });
+
+         if (onlineTransferRecords.length === 0) {
+             toast({ title: 'Info', description: `No online transfer employees found for this period.`, variant: 'default' });
+             console.log(`No online transfer employees found for this period.`);
+             return;
+         }
+
+         let csvData: string = '';
+         let fileName = `${fileNameBase}_${formatType}.csv`;
+
+         if (formatType === 'BSP') {
+             const csvRows: string[] = []; // No header for BSP
+             onlineTransferRecords.forEach(record => {
+                 const employeeDetails = employees.find(emp => emp.id === record.employeeId);
+                 csvRows.push([
+                     employeeDetails?.bankCode || '',
+                     employeeDetails?.bankAccountNumber || '',
+                     record.netPay.toFixed(2),
+                     'Salary',
+                     record.employeeName,
+                 ].join(','));
+             });
+             csvData = csvRows.join('\n');
+         } else { // BRED format
+             const csvRows = [
+                 // No headers for BRED export as per request for create page
+             ];
+             onlineTransferRecords.forEach(record => {
+                 const employeeDetails = employees.find(emp => emp.id === record.employeeId);
+                 csvRows.push([
+                     employeeDetails?.bankCode || '',
+                     record.employeeName,
+                     '', // Empty Employee 2 Column
+                     employeeDetails?.bankAccountNumber || '',
+                     record.netPay.toFixed(2),
+                     'Salary',
+                 ].join(','));
+             });
+             csvData = csvRows.join('\n');
+         }
+
+         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+         const url = URL.createObjectURL(blob);
+         const link = document.createElement('a');
+         link.href = url;
+         link.setAttribute('download', fileName);
+         document.body.appendChild(link);
+         link.click();
+         document.body.removeChild(link);
+         URL.revokeObjectURL(url);
+         toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
+         console.log(`Wage records exported to CSV (${formatType}) successfully!`);
+
+     } else if (formatType === 'Excel') {
+          const excelData = [
+             [ // Headers
+                 'Employee Name', 'Hourly Wage', 'Total Hours', 'Normal Hours', 'Overtime Hours', 'Meal Allowance',
+                 'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
+                 'Date From', 'Date To',
+             ],
+             ...recordsToExport.map(record => {
+                 const employee = employees.find(emp => emp.id === record.employeeId);
+                 return [ // Data rows
+                     record.employeeName, record.hourlyWage.toFixed(2),
+                     record.totalHours.toFixed(2), record.hoursWorked.toFixed(2), record.overtimeHours?.toFixed(2) || '0.00',
+                     record.mealAllowance.toFixed(2),
+                     employee?.fnpfEligible ? record.fnpfDeduction.toFixed(2) : 'N/A', // Check eligibility for display
+                     record.otherDeductions.toFixed(2),
+                     record.grossPay.toFixed(2), record.netPay.toFixed(2),
+                     record.dateFrom, // Keep as YYYY-MM-DD string
+                     record.dateTo,   // Keep as YYYY-MM-DD string
+                 ];
+             }),
+             [ // Totals row
+                 'Totals', '', // Spacers for name, wage
+                 recordsToExport.reduce((sum, r) => sum + r.totalHours, 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + r.hoursWorked, 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + (r.overtimeHours || 0), 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + r.mealAllowance, 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + r.fnpfDeduction, 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + r.otherDeductions, 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2),
+                 recordsToExport.reduce((sum, r) => sum + r.netPay, 0).toFixed(2),
+                 '', '', // Spacers for dates
+             ],
+         ];
 
 
-    if (formatType === 'BSP' || formatType === 'BRED') {
-        const onlineTransferRecords = recordsToExport.filter(record => {
-            const employee = employees.find(emp => emp.id === record.employeeId);
-            return employee?.paymentMethod === 'online';
-        });
-
-        if (onlineTransferRecords.length === 0) {
-            toast({ title: 'Info', description: `No online transfer employees found for this period.`, variant: 'default' });
-            console.log(`No online transfer employees found for this period.`);
-            return;
-        }
-
-        let csvData: string = '';
-        let fileName = `${fileNameBase}_${formatType}.csv`;
-
-        if (formatType === 'BSP') {
-            const csvRows: string[] = []; // No header for BSP
-            onlineTransferRecords.forEach(record => {
-                const employeeDetails = employees.find(emp => emp.id === record.employeeId);
-                csvRows.push([
-                    employeeDetails?.bankCode || '',
-                    employeeDetails?.bankAccountNumber || '',
-                    record.netPay.toFixed(2),
-                    'Salary',
-                    record.employeeName,
-                ].join(','));
-            });
-            csvData = csvRows.join('\n');
-        } else { // BRED format
-            const csvRows = [
-                // No headers for BRED export as per request for create page
-            ];
-            onlineTransferRecords.forEach(record => {
-                const employeeDetails = employees.find(emp => emp.id === record.employeeId);
-                csvRows.push([
-                    employeeDetails?.bankCode || '',
-                    record.employeeName,
-                    '', // Empty Employee 2 Column
-                    employeeDetails?.bankAccountNumber || '',
-                    record.netPay.toFixed(2),
-                    'Salary',
-                ].join(','));
-            });
-            csvData = csvRows.join('\n');
-        }
-
-        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
-        console.log(`Wage records exported to CSV (${formatType}) successfully!`);
-
-    } else if (formatType === 'Excel') {
-         const excelData = [
-            [ // Headers
-                'Employee Name', 'Hourly Wage', 'Total Hours', 'Normal Hours', 'Overtime Hours', 'Meal Allowance',
-                'FNPF Deduction', 'Other Deductions', 'Gross Pay', 'Net Pay',
-                'Date From', 'Date To',
-            ],
-            ...recordsToExport.map(record => {
-                const employee = employees.find(emp => emp.id === record.employeeId);
-                return [ // Data rows
-                    record.employeeName, record.hourlyWage.toFixed(2),
-                    record.totalHours.toFixed(2), record.hoursWorked.toFixed(2), record.overtimeHours?.toFixed(2) || '0.00',
-                    record.mealAllowance.toFixed(2),
-                    employee?.fnpfEligible ? record.fnpfDeduction.toFixed(2) : 'N/A', // Check eligibility for display
-                    record.otherDeductions.toFixed(2),
-                    record.grossPay.toFixed(2), record.netPay.toFixed(2),
-                    record.dateFrom, // Keep as YYYY-MM-DD string
-                    record.dateTo,   // Keep as YYYY-MM-DD string
-                ];
-            }),
-            [ // Totals row
-                'Totals', '', // Spacers for name, wage
-                recordsToExport.reduce((sum, r) => sum + r.totalHours, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.hoursWorked, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + (r.overtimeHours || 0), 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.mealAllowance, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.fnpfDeduction, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.otherDeductions, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2),
-                recordsToExport.reduce((sum, r) => sum + r.netPay, 0).toFixed(2),
-                '', '', // Spacers for dates
-            ],
-        ];
-
-
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(excelData);
-        ws['!cols'] = [
-          {wch: 20}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 14}, {wch: 15},
-          {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}
-        ];
-        XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
-        XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
-        toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' });
-        console.log('Wage records exported to Excel successfully!');
-    }
-  };
+         const wb = XLSX.utils.book_new();
+         const ws = XLSX.utils.aoa_to_sheet(excelData);
+         ws['!cols'] = [
+           {wch: 20}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 14}, {wch: 15},
+           {wch: 15}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}
+         ];
+         XLSX.utils.book_append_sheet(wb, ws, 'Wage Records');
+         XLSX.writeFile(wb, `${fileNameBase}.xlsx`);
+         toast({ title: 'Success', description: 'Wage records exported to Excel successfully!' });
+         console.log('Wage records exported to Excel successfully!');
+     }
+   };
 
   const renderPayPeriodTable = (periods: PayPeriodSummary[], status: 'pending' | 'approved' | 'declined') => (
        <div className="border border-white/20 rounded-lg overflow-hidden max-h-[300px] overflow-y-auto mb-6">
@@ -355,10 +351,9 @@ const WagesRecordsPage = () => {
                   periods.map((period) => (
                   <TableRow
                       key={period.approvalId}
-                      onClick={() => status === 'approved' && handlePeriodSelect(period.approvalId)} // Only allow select on approved
+                      onClick={() => handlePeriodSelect(period.approvalId)} // Allow selecting any period now
                       className={cn(
-                      "border-t border-white/10 hover:bg-white/15",
-                       status === 'approved' && "cursor-pointer", // Cursor pointer only for approved
+                      "border-t border-white/10 hover:bg-white/15 cursor-pointer", // Always pointer
                       selectedApprovalId === period.approvalId && "bg-white/25 font-semibold"
                       )}
                   >
@@ -407,6 +402,21 @@ const WagesRecordsPage = () => {
                                   <span className="sr-only">Copy Approval Link</span>
                               </Button>
                            )}
+
+                            {/* Export Buttons (only for approved status and when selected) */}
+                            {status === 'approved' && selectedApprovalId === period.approvalId && (
+                                <>
+                                    <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleExport('BSP');}} className="h-7 px-2 mr-2 bg-blue-600 hover:bg-blue-700 text-white" title="Export BSP CSV">
+                                        <FileDown className="h-3.5 w-3.5" /> BSP
+                                    </Button>
+                                    <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleExport('BRED');}} className="h-7 px-2 mr-2 bg-red-600 hover:bg-red-700 text-white" title="Export BRED CSV">
+                                        <FileDown className="h-3.5 w-3.5" /> BRED
+                                    </Button>
+                                    <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleExport('Excel');}} className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white" title="Export Excel">
+                                         <FileText className="h-3.5 w-3.5" /> Excel
+                                     </Button>
+                                </>
+                            )}
                       </TableCell>
                   </TableRow>
                   ))
@@ -466,9 +476,9 @@ const WagesRecordsPage = () => {
                  </TabsTrigger>
                </TabsList>
 
-               {isLoading ? (
+               {isLoading && !selectedApprovalId ? ( // Show general loading only when fetching the list initially
                  <div className="text-center text-white py-10 flex items-center justify-center">
-                   <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading records...
+                   <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading periods...
                  </div>
                ) : (
                  <>
@@ -485,14 +495,24 @@ const WagesRecordsPage = () => {
                )}
              </Tabs>
 
-             {/* Wage Details Section (Visible when an approved period is selected) */}
-             {selectedApprovalId && selectedStatus === 'approved' && selectedPeriodRecords.length > 0 && (
+              {/* Display loading indicator specifically for details */}
+             {isLoading && selectedApprovalId && (
+                 <div className="text-center text-white py-10 flex items-center justify-center">
+                   <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading record details...
+                 </div>
+              )}
+
+
+             {/* Wage Details Section (Visible when a period is selected and not loading details) */}
+             {selectedApprovalId && !isLoading && selectedPeriodRecords.length > 0 && (
                <div className="mt-6">
                  <h3 className="text-lg font-medium text-white mb-4 text-center">
                    Wage Details for {
-                     payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId) ?
-                     `${isDateValid(parseISO(payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId)!.dateFrom)) ? format(parseISO(payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId)!.dateFrom), 'MMM dd, yyyy') : 'Invalid Date'} - ${isDateValid(parseISO(payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId)!.dateTo)) ? format(parseISO(payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId)!.dateTo), 'MMM dd, yyyy') : 'Invalid Date'}`
-                     : 'Selected Period'
+                      // Find the selected period from any status list to display the date range
+                      [...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending]
+                      .find(g => g.approvalId === selectedApprovalId) ?
+                      `${isDateValid(parseISO([...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending].find(g => g.approvalId === selectedApprovalId)!.dateFrom)) ? format(parseISO([...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending].find(g => g.approvalId === selectedApprovalId)!.dateFrom), 'MMM dd, yyyy') : 'Invalid Date'} - ${isDateValid(parseISO([...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending].find(g => g.approvalId === selectedApprovalId)!.dateTo)) ? format(parseISO([...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending].find(g => g.approvalId === selectedApprovalId)!.dateTo), 'MMM dd, yyyy') : 'Invalid Date'}`
+                      : 'Selected Period'
                    }
                  </h3>
                  <div className="border border-white/20 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
@@ -537,11 +557,32 @@ const WagesRecordsPage = () => {
                            </TableRow>
                          );
                        })}
-                       {/* Add totals row for details table if needed */}
+                       {/* Add totals row for details table */}
                        <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
-                           <TableCell colSpan={11} className="text-right text-white pr-4 border-r border-white/20">
-                               Total Net Pay:
-                           </TableCell>
+                            <TableCell colSpan={4} className="text-right text-white pr-4 border-r border-white/20">
+                               Totals:
+                            </TableCell>
+                            <TableCell className="text-white border-r border-white/20 text-right">
+                                {selectedPeriodRecords.reduce((sum, r) => sum + r.totalHours, 0).toFixed(2)}
+                            </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right">
+                                {selectedPeriodRecords.reduce((sum, r) => sum + r.hoursWorked, 0).toFixed(2)}
+                            </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right">
+                                {selectedPeriodRecords.reduce((sum, r) => sum + (r.overtimeHours || 0), 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-white border-r border-white/20 text-right">
+                                ${selectedPeriodRecords.reduce((sum, r) => sum + r.mealAllowance, 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-white border-r border-white/20 text-right">
+                                ${selectedPeriodRecords.reduce((sum, r) => sum + r.fnpfDeduction, 0).toFixed(2)}
+                            </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right">
+                                ${selectedPeriodRecords.reduce((sum, r) => sum + r.otherDeductions, 0).toFixed(2)}
+                            </TableCell>
+                             <TableCell className="text-white border-r border-white/20 text-right">
+                                ${selectedPeriodRecords.reduce((sum, r) => sum + r.grossPay, 0).toFixed(2)}
+                            </TableCell>
                            <TableCell className="text-white text-right">
                                ${selectedPeriodRecords.reduce((sum, r) => sum + r.netPay, 0).toFixed(2)}
                            </TableCell>
@@ -549,20 +590,20 @@ const WagesRecordsPage = () => {
                      </TableBody>
                    </Table>
                  </div>
-
-                 {/* Action Buttons for Selected Approved Period */}
-                 <div className="flex flex-wrap gap-3 mt-6 justify-center">
-                   <Button variant="secondary" onClick={() => handleExport('BSP')} className="min-w-[140px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20" disabled={!selectedApprovalId || selectedPeriodRecords.length === 0}>
-                     <FileDown className="mr-2 h-4 w-4" /> BSP CSV
-                   </Button>
-                   <Button variant="secondary" onClick={() => handleExport('BRED')} className="min-w-[140px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20" disabled={!selectedApprovalId || selectedPeriodRecords.length === 0}>
-                     <FileDown className="mr-2 h-4 w-4" /> BRED CSV
-                   </Button>
-                   <Button variant="secondary" onClick={() => handleExport('Excel')} className="min-w-[140px] hover:bg-gray-700/80 bg-white/10 text-white border border-white/20" disabled={!selectedApprovalId || selectedPeriodRecords.length === 0}>
-                     <FileText className="mr-2 h-4 w-4" /> Excel
-                   </Button>
-                 </div>
                </div>
+             )}
+             {/* Display message if no records found for selected period */}
+              {selectedApprovalId && !isLoading && selectedPeriodRecords.length === 0 && (
+                  <div className="text-center text-gray-400 mt-6 py-4">
+                      No wage details found for the selected period.
+                  </div>
+              )}
+
+              {/* Message when no period is selected */}
+             {!selectedApprovalId && !isLoading && (
+                 <div className="text-center text-gray-400 mt-6 py-4">
+                     Select a pay period from the list above to view details or perform actions.
+                 </div>
              )}
 
            </CardContent>
@@ -570,12 +611,12 @@ const WagesRecordsPage = () => {
        </main>
 
         {/* AlertDialog for delete confirmation */}
-        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialog open={showDeleteDialog} onOpenChange={(open) => { if (!open) { setShowDeleteDialog(false); setDeletePassword(''); setSelectedApprovalId(null); } }}>
             <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
             <AlertDialogHeader>
                 <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
                 <AlertDialogDescription className="text-gray-300">
-                Delete wage records for the selected period? This cannot be undone. Enter admin password.
+                Are you sure you want to delete all wage records for the selected period? This action cannot be undone. Please enter the admin password to confirm.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="grid gap-2">
@@ -597,9 +638,7 @@ const WagesRecordsPage = () => {
         </AlertDialog>
 
          {/* Footer is handled by RootLayout */}
-         <footer className="w-full text-center py-4 text-xs text-white relative z-10 bg-black/30 backdrop-blur-sm">
-             © {new Date().getFullYear()} Aayush Atishay Lal 北京化工大学
-         </footer>
+
     </div>
   );
 };
