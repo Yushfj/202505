@@ -1,11 +1,9 @@
-
 'use server';
 
 import { Pool, PoolClient } from 'pg'; // Ensure PoolClient is imported if used in transactions
 import { query, getDbPool } from '@/lib/db';
 import { format, isValid as isDateValid, parseISO } from 'date-fns';
 import { randomBytes } from 'crypto';
-// import nodemailer from 'nodemailer'; // Removed Nodemailer import
 
 // --- Interfaces ---
 // Define the structure for an Employee object
@@ -42,7 +40,7 @@ export interface WageRecord {
   netPay: number;
   dateFrom: string; // YYYY-MM-DD string
   dateTo: string; // YYYY-MM-DD string
-  approvalId?: string; // Reference to the approval batch
+  approvalId?: string; // Optional for viewing, required for saving via approval
   approvalStatus?: 'pending' | 'approved' | 'declined'; // Optional status
   created_at?: Date;
 }
@@ -66,6 +64,8 @@ export interface PayPeriodSummary {
   dateTo: string; // YYYY-MM-DD
   approvalId: string;
   totalWages: number;
+  totalCashWages: number; // Added
+  totalOnlineWages: number; // Added
   status: 'pending' | 'approved' | 'declined'; // Include status
   token?: string; // Include token for generating link
 }
@@ -121,7 +121,7 @@ export const getEmployees = async (includeInactive = false): Promise<Employee[]>
     })) as Employee[];
   } catch (error: any) {
     // Log the original error for better debugging
-    console.error('Detailed error fetching employees from database:', error);
+    console.error('Detailed error fetching employees from database:', error.stack); // Log stack trace
     let errorMessage = `Failed to fetch employees. DB Error: ${error.message || 'Unknown database error'}`;
     if (error.message?.includes('relation "employees1" does not exist')) {
         errorMessage = 'Failed to fetch employees. The "employees1" table does not seem to exist in the database. Please check the schema.';
@@ -231,7 +231,7 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
     console.log('Employee added successfully with ID:', result.rows[0].id);
     return result.rows[0].id; // Return the newly generated UUID from the DB
   } catch (error: any) {
-    console.error('Detailed error adding employee to database:', error);
+    console.error('Detailed error adding employee to database:', error.stack); // Log stack trace
     console.error('Error Code:', error.code); // Log specific PG error code if available
     console.error('Error Constraint:', error.constraint); // Log constraint name if available (e.g., for unique violation)
 
@@ -298,7 +298,7 @@ export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: 
             return null; // FNPF number does not exist
         }
     } catch (error: any) {
-        console.error("Error checking existing FNPF number:", error);
+        console.error("Error checking existing FNPF number:", error.stack); // Log stack trace
         // Treat check failure as "doesn't exist" to avoid blocking unnecessarily,
         // but the INSERT will fail later if there's a real duplicate.
         throw new Error(`Failed to check existing FNPF number. DB Error: ${error.message || 'Unknown database error'}`);
@@ -308,6 +308,7 @@ export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: 
 
 /**
  * Updates an existing employee's information in the PostgreSQL database.
+ * Also updates the denormalized employee_name in wage_records.
  * @param {Omit<Employee, 'created_at' | 'updated_at'>} updatedEmployee - The employee object with updated information. ID and isActive must be included.
  * @returns {Promise<void>} A promise that resolves when the update is complete.
  * @throws {Error} If the employee with the specified ID is not found or update fails.
@@ -345,66 +346,86 @@ export const updateEmployee = async (updatedEmployee: Omit<Employee, 'created_at
    const finalBankCode = paymentMethod === 'online' ? (bankCode || null) : null; // Set null if not online or empty
    const finalBankAccountNumber = paymentMethod === 'online' ? (bankAccountNumber?.trim() || null) : null; // Trim and ensure null
 
+   let client;
+   try {
+       const pool = await getDbPool();
+       client = await pool.connect();
+       await client.query('BEGIN'); // Start transaction
 
-  try {
-    // Check for existing FNPF Number before attempting to update if FNPF# changed
-    if (finalFnpfNo) {
-        const existingFnpf = await checkExistingFNPFNo(finalFnpfNo);
-        // If FNPF exists and belongs to a DIFFERENT employee ID
-        if (existingFnpf && existingFnpf.id !== id) {
-            throw new Error(`Failed to update employee. The FNPF Number '${finalFnpfNo}' already exists for another employee.`);
-        }
-      }
+       // 1. Check for existing FNPF Number before attempting to update if FNPF# changed
+       if (finalFnpfNo) {
+           const existingFnpfResult = await client.query(
+               `SELECT id FROM employees1 WHERE fnpf_no = $1 AND id != $2 LIMIT 1;`,
+               [finalFnpfNo, id]
+           );
+           if (existingFnpfResult.rows.length > 0) {
+               throw new Error(`Failed to update employee. The FNPF Number '${finalFnpfNo}' already exists for another employee (ID: ${existingFnpfResult.rows[0].id}).`);
+           }
+       }
 
-    const result = await query(
-      `UPDATE employees1 -- Use the correct table name
-       SET
-         employee_name = $1, -- Use employee_name for the column
-         position = $2,
-         hourly_wage = $3,
-         fnpf_no = $4,
-         tin_no = $5,
-         bank_code = $6,
-         bank_account_number = $7,
-         payment_method = $8,
-         branch = $9,
-         fnpf_eligible = $10,
-         is_active = $11, -- Update is_active status
-         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $12;`, // Adjust parameter index
-      [
-        name, // This value updates the employee_name column
-        position,
-        hourlyWageNumeric,
-        finalFnpfNo,
-        finalTinNo, // Use trimmed or null value
-        finalBankCode,
-        finalBankAccountNumber,
-        paymentMethod,
-        branch,
-        fnpfEligible,
-        isActive, // Pass the isActive boolean
-        id, // The ID for the WHERE clause
-      ]
-    );
+       // 2. Update the employee record
+       const updateResult = await client.query(
+           `UPDATE employees1 -- Use the correct table name
+            SET
+              employee_name = $1, -- Use employee_name for the column
+              position = $2,
+              hourly_wage = $3,
+              fnpf_no = $4,
+              tin_no = $5,
+              bank_code = $6,
+              bank_account_number = $7,
+              payment_method = $8,
+              branch = $9,
+              fnpf_eligible = $10,
+              is_active = $11, -- Update is_active status
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = $12;`, // Adjust parameter index
+           [
+               name, // This value updates the employee_name column
+               position,
+               hourlyWageNumeric,
+               finalFnpfNo,
+               finalTinNo, // Use trimmed or null value
+               finalBankCode,
+               finalBankAccountNumber,
+               paymentMethod,
+               branch,
+               fnpfEligible,
+               isActive, // Pass the isActive boolean
+               id, // The ID for the WHERE clause
+           ]
+       );
 
-    if (result.rowCount === 0) {
-      // Throw an error if no rows were affected (employee not found)
-      throw new Error(`Employee with ID ${id} not found for update.`);
-    }
-    console.log(`Employee with ID ${id} updated successfully.`);
-  } catch (error: any) {
-    console.error(`Detailed error updating employee with ID ${id}:`, error);
-    // Check for specific errors like duplicate FNPF number during update
-    let errorMessage = `Failed to update employee. DB Error: ${error.message || 'Unknown database error'}`;
-     if (error.message?.includes('FNPF Number already exists')) {
-        errorMessage = error.message;
-    } else if (error.code === '23505' && error.constraint === 'employees1_fnpf_no_key') {
-        errorMessage = `Failed to update employee. The FNPF Number '${finalFnpfNo}' already exists for another employee.`;
-    }
-    // Re-throw the potentially enhanced error message
-    throw new Error(errorMessage);
-  }
+       if (updateResult.rowCount === 0) {
+           // Throw an error if no rows were affected (employee not found)
+           throw new Error(`Employee with ID ${id} not found for update.`);
+       }
+       console.log(`Employee with ID ${id} updated successfully.`);
+
+       // 3. Update denormalized name in wage_records (important for consistency)
+       const updateWageRecordsResult = await client.query(
+           `UPDATE wage_records SET employee_name = $1 WHERE employee_id = $2;`,
+           [name, id]
+       );
+       console.log(`Updated employee name in ${updateWageRecordsResult.rowCount} wage records for employee ID ${id}.`);
+
+       await client.query('COMMIT'); // Commit the transaction
+
+   } catch (error: any) {
+       if (client) await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr)); // Rollback on error
+       console.error(`Detailed error updating employee with ID ${id}:`, error.stack); // Log stack trace
+       // Check for specific errors like duplicate FNPF number during update
+       let errorMessage = `Failed to update employee. DB Error: ${error.message || 'Unknown database error'}`;
+       if (error.message?.includes('FNPF Number already exists')) {
+           errorMessage = error.message;
+       } else if (error.code === '23505' && error.constraint === 'employees1_fnpf_no_key') {
+           errorMessage = `Failed to update employee. The FNPF Number '${finalFnpfNo}' already exists for another employee.`;
+       }
+       // Re-throw the potentially enhanced error message
+       throw new Error(errorMessage);
+   } finally {
+       if (client) client.release(); // Release the client back to the pool
+   }
 };
 
 /**
@@ -429,7 +450,7 @@ export const setEmployeeActiveStatus = async (employeeId: string, isActive: bool
         }
         console.log(`Employee with ID ${employeeId} active status set to ${isActive}.`);
     } catch (error: any) {
-        console.error(`Detailed error setting active status for employee ${employeeId}:`, error);
+        console.error(`Detailed error setting active status for employee ${employeeId}:`, error.stack); // Log stack trace
         throw new Error(`Failed to update employee active status. DB Error: ${error.message || 'Unknown database error'}`);
     }
 };
@@ -447,32 +468,40 @@ export const deleteEmployee = async (employeeId: string): Promise<void> => {
      throw new Error('Employee ID is required for deletion.');
    }
 
+  let client;
   try {
-    // Before deleting, check for related wage records (optional but recommended)
-    const wageCheck = await query('SELECT 1 FROM wage_records WHERE employee_id = $1 LIMIT 1;', [employeeId]);
-    if (wageCheck.rowCount > 0) {
-        console.warn(`Attempting to delete employee ${employeeId} who has wage records. Consider inactivating instead.`);
-        // Optionally throw an error to prevent deletion if wage records exist
-        // throw new Error(`Cannot delete employee ${employeeId} as they have associated wage records. Consider marking as inactive instead.`);
-    }
+    const pool = await getDbPool();
+    client = await pool.connect();
+    await client.query('BEGIN'); // Start transaction
 
-    const result = await query('DELETE FROM employees1 WHERE id = $1;', [employeeId]); // Use the correct table name
+    // Delete related wage records first (if any)
+    const deleteWagesResult = await client.query('DELETE FROM wage_records WHERE employee_id = $1;', [employeeId]);
+    console.log(`Deleted ${deleteWagesResult.rowCount} wage records for employee ID ${employeeId} before deleting employee.`);
 
-    if (result.rowCount === 0) {
+    // Then delete the employee
+    const deleteEmployeeResult = await client.query('DELETE FROM employees1 WHERE id = $1;', [employeeId]); // Use the correct table name
+
+    if (deleteEmployeeResult.rowCount === 0) {
       console.warn(`Attempted to delete employee with ID ${employeeId}, but they were not found.`);
-      // Optional: throw an error if deletion is critical and the record should have existed
-      // throw new Error(`Employee with ID ${employeeId} not found for deletion.`);
+      // No need to throw an error if not found, as the goal is removal
     } else {
        console.log(`Employee with ID ${employeeId} deleted successfully.`);
     }
+
+    await client.query('COMMIT'); // Commit transaction
+
   } catch (error: any) {
-    console.error(`Detailed error deleting employee with ID ${employeeId}:`, error);
+    if (client) await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr)); // Rollback on error
+    console.error(`Detailed error deleting employee with ID ${employeeId}:`, error.stack); // Log stack trace
     let errorMessage = `Failed to delete employee. DB Error: ${error.message || 'Unknown database error'}`;
-     if (error.code === '23503') { // Foreign key violation
-        errorMessage = `Cannot delete employee ${employeeId}. They have associated records (e.g., wages) that must be deleted or handled first. Consider marking as inactive instead.`;
+     // Check if the error is because of remaining foreign key constraints (shouldn't happen if we deleted wages first)
+     if (error.code === '23503') {
+        errorMessage = `Cannot delete employee ${employeeId}. There might be other related records. Consider marking as inactive instead.`;
      }
     // Re-throw the potentially enhanced error message
     throw new Error(errorMessage);
+  } finally {
+      if (client) client.release(); // Release the client
   }
 };
 
@@ -522,7 +551,7 @@ export const getEmployeeById = async (employeeId: string): Promise<Employee | nu
         tinNo: row.tinNo, // Ensure TIN is included
     } as Employee;
   } catch (error: any) {
-    console.error(`Detailed error fetching employee with ID ${employeeId}:`, error);
+    console.error(`Detailed error fetching employee with ID ${employeeId}:`, error.stack); // Log stack trace
     // Re-throw the original error from the query function
     throw error;
   }
@@ -633,18 +662,17 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
          // --- Validation and Warning for NEXT_PUBLIC_BASE_URL ---
          if (!baseURL) {
             console.error("CRITICAL: NEXT_PUBLIC_BASE_URL environment variable is not set. Approval links will not work correctly in deployment. Please set it in your .env file (for local development) and in your Railway environment variables (for deployment) to your deployed application's public URL (e.g., https://your-app-name.railway.app). Using fallback: http://localhost:9002");
-            // throw new Error("Application base URL (NEXT_PUBLIC_BASE_URL) is not configured. Cannot generate approval link.");
          } else if (baseURL === 'http://localhost:9002' && process.env.NODE_ENV === 'production') {
              console.warn("WARNING: NEXT_PUBLIC_BASE_URL is set to a localhost address in a production environment. Approval links will likely not work for external users. Ensure NEXT_PUBLIC_BASE_URL is set to the public URL of your deployed application in your hosting environment (e.g., Railway).");
          } else if (!baseURL.startsWith('http://') && !baseURL.startsWith('https://')) {
              console.warn(`WARNING: NEXT_PUBLIC_BASE_URL "${baseURL}" does not seem to be a valid URL. Approval links may not work. Please check the value in your environment variables.`);
-             // Consider throwing an error if the format is strictly required:
-             // throw new Error("Invalid Application base URL format configured. Cannot generate approval link.");
          }
          // --- End Validation ---
 
-
-        const approvalLink = `${baseURL}/approve-wages?token=${token}`;
+        // Construct the link path carefully
+        const path = '/approve-wages'; // Ensure leading slash
+        const cleanBaseURL = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL;
+        const approvalLink = `${cleanBaseURL}${path}?token=${token}`;
 
         console.log(`Approval link generated: ${approvalLink}`);
 
@@ -655,7 +683,7 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
             await client.query('ROLLBACK');
             console.log('Transaction rolled back due to error.');
         }
-        console.error('Detailed error requesting wage approval:', error);
+        console.error('Detailed error requesting wage approval:', error.stack); // Log stack trace
         throw new Error(`Failed to request wage approval. DB Error: ${error.message || 'Unknown error'}`);
     } finally {
         if (client) {
@@ -696,8 +724,10 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
                meal_allowance AS "mealAllowance", fnpf_deduction AS "fnpfDeduction", other_deductions AS "otherDeductions",
                gross_pay AS "grossPay", net_pay AS "netPay",
                TO_CHAR(wr.date_from, 'YYYY-MM-DD') AS "dateFrom", TO_CHAR(wr.date_to, 'YYYY-MM-DD') AS "dateTo",
-               wr.created_at, wr.approval_id AS "approvalId"
+               wr.created_at, wr.approval_id AS "approvalId", -- Include approval_id
+               e.payment_method AS "paymentMethod" -- Include payment method
              FROM wage_records wr
+             INNER JOIN employees1 e ON wr.employee_id = e.id -- Join with employees1 to get payment method
              WHERE wr.approval_id = $1
              ORDER BY wr.employee_name;`,
             [approval.id]
@@ -719,7 +749,7 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
         return { approval, records };
 
     } catch (error: any) {
-        console.error(`Error fetching wages for approval token ${token}:`, error);
+        console.error(`Error fetching wages for approval token ${token}:`, error.stack); // Log stack trace
         // Provide a more specific error message if possible
         let errorMessage = `Failed to fetch wages for approval.`;
         if (error.message?.includes('relation "wage_approvals" does not exist')) {
@@ -805,7 +835,7 @@ export const updateWageApprovalStatus = async (
         if (client) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr)); // Catch rollback error too
         }
-        console.error(`Error updating wage approval status for token ${token}:`, error);
+        console.error(`Error updating wage approval status for token ${token}:`, error.stack); // Log stack trace
         throw new Error(`Failed to update approval status. DB Error: ${error.message || 'Unknown error'}`);
     } finally {
          if (client) client.release();
@@ -854,7 +884,7 @@ export const deleteWageRecordsByApprovalId = async (approvalId: string): Promise
            await client.query('ROLLBACK');
            console.log('Transaction rolled back due to deletion error.');
        }
-       console.error(`Detailed error deleting wage records and approval for approval ID ${approvalId}:`, error);
+       console.error(`Detailed error deleting wage records and approval for approval ID ${approvalId}:`, error.stack); // Log stack trace
        throw new Error(`Failed to delete wage data. DB Error: ${error.message || 'Unknown error'}`);
    } finally {
        if (client) {
@@ -865,8 +895,8 @@ export const deleteWageRecordsByApprovalId = async (approvalId: string): Promise
 
 
 /**
- * Fetches distinct pay periods summaries (date_from, date_to, approval_id, totalWages)
- * from the database, filtered by status.
+ * Fetches distinct pay periods summaries (date_from, date_to, approval_id, totals)
+ * from the database, filtered by status. Calculates cash and online totals.
  * @param {string} status - The status to filter by ('pending', 'approved', 'declined').
  * @returns {Promise<PayPeriodSummary[]>} A promise resolving with the summaries.
  */
@@ -878,9 +908,12 @@ export const getPayPeriodSummaries = async (status: 'pending' | 'approved' | 'de
       wa.id AS "approvalId",
       wa.status, -- Include status in selection
       wa.token, -- Include token
-      COALESCE(SUM(wr.net_pay), 0) AS "totalWages" -- Use COALESCE to handle periods with 0 records
+      COALESCE(SUM(wr.net_pay), 0) AS "totalWages", -- Use COALESCE for overall total
+      COALESCE(SUM(CASE WHEN e.payment_method = 'cash' THEN wr.net_pay ELSE 0 END), 0) AS "totalCashWages",
+      COALESCE(SUM(CASE WHEN e.payment_method = 'online' THEN wr.net_pay ELSE 0 END), 0) AS "totalOnlineWages"
     FROM wage_approvals wa
-    LEFT JOIN wage_records wr ON wa.id = wr.approval_id -- Use LEFT JOIN to include approvals with no records yet
+    LEFT JOIN wage_records wr ON wa.id = wr.approval_id
+    LEFT JOIN employees1 e ON wr.employee_id = e.id -- Join with employees to get payment method
     WHERE wa.status = $1
     GROUP BY wa.id, wa.date_from, wa.date_to, wa.status, wa.token -- Group by status and token as well
     ORDER BY wa.date_from DESC;
@@ -891,9 +924,11 @@ export const getPayPeriodSummaries = async (status: 'pending' | 'approved' | 'de
     return result.rows.map(row => ({
         ...row,
         totalWages: Number(row.totalWages) || 0,
+        totalCashWages: Number(row.totalCashWages) || 0,
+        totalOnlineWages: Number(row.totalOnlineWages) || 0,
     })) as PayPeriodSummary[];
   } catch (error: any) {
-    console.error(`Detailed error fetching ${status} pay periods:`, error);
+    console.error(`Detailed error fetching ${status} pay periods:`, error.stack); // Log stack trace
     throw error;
   }
 };
@@ -901,8 +936,8 @@ export const getPayPeriodSummaries = async (status: 'pending' | 'approved' | 'de
 
 /**
  * Fetches wage records from the database, optionally filtered by date range and approval status.
- * @param {Date | null} filterDateFrom - Optional start date for filtering.
- * @param {Date | null} filterDateTo - Optional end date for filtering.
+ * @param {Date | string | null} filterDateFrom - Optional start date for filtering.
+ * @param {Date | string | null} filterDateTo - Optional end date for filtering.
  * @param {string | null} approvalStatus - Optional status to filter by ('pending', 'approved', 'declined').
  * @returns {Promise<WageRecord[]>} A promise resolving with the fetched records.
  */
@@ -930,9 +965,11 @@ export const getWageRecords = async (
       TO_CHAR(wr.date_to, 'YYYY-MM-DD') AS "dateTo",
       wr.created_at,
       wr.approval_id AS "approvalId", -- Include approval_id
-      wa.status AS "approvalStatus"   -- Include approval status
+      e.payment_method AS "paymentMethod",   -- Include approval status
+      e.fnpf_eligible AS "fnpfEligible" -- Include FNPF eligibility
     FROM wage_records wr
-    LEFT JOIN wage_approvals wa ON wr.approval_id = wa.id -- Use LEFT JOIN to handle potential null approval_id if needed
+    INNER JOIN employees1 e ON wr.employee_id = e.id
+    LEFT JOIN wage_approvals wa ON wr.approval_id = wa.id
   `;
   const queryParams: any[] = [];
   const conditions: string[] = [];
@@ -991,9 +1028,10 @@ export const getWageRecords = async (
         otherDeductions: Number(row.otherDeductions) || 0,
         grossPay: Number(row.grossPay) || 0,
         netPay: Number(row.netPay) || 0,
+        fnpfEligible: Boolean(row.fnpfEligible) // Ensure boolean
     })) as WageRecord[];
   } catch (error: any) {
-    console.error('Detailed error fetching wage records from database:', error);
+    console.error('Detailed error fetching wage records from database:', error.stack); // Log stack trace
     throw error;
   }
 };
@@ -1012,8 +1050,27 @@ export const checkWageRecordsExistByDateRange = async (dateFrom: string, dateTo:
         );
         return result.rowCount > 0;
     } catch (error: any) {
-        console.error(`Error checking if wage records exist for ${dateFrom} to ${dateTo}:`, error);
+        console.error(`Error checking if wage records exist for ${dateFrom} to ${dateTo}:`, error.stack); // Log stack trace
         throw new Error(`Failed to check wage records existence. DB Error: ${error.message || 'Unknown error'}`);
     }
 };
 
+/**
+ * Updates the name of an employee in existing wage records when the employee's name is changed.
+ * This ensures that the denormalized employee name in the wage records is consistent with the employees table.
+ * @param {string} employeeId - The ID of the employee whose name has been updated.
+ * @param {string} newEmployeeName - The new name of the employee.
+ * @returns {Promise<void>}
+ */
+export const updateEmployeeNameInWageRecords = async (employeeId: string, newEmployeeName: string): Promise<void> => {
+    try {
+        const result = await query(
+            `UPDATE wage_records SET employee_name = $1 WHERE employee_id = $2;`,
+            [newEmployeeName, employeeId]
+        );
+        console.log(`Updated employee name to "${newEmployeeName}" in ${result.rowCount} wage records for employee ID ${employeeId}.`);
+    } catch (error: any) {
+        console.error(`Error updating employee name in wage_records for employee ID ${employeeId}:`, error.stack);
+        throw new Error(`Failed to update employee name in wage records. DB Error: ${error.message || 'Unknown error'}`);
+    }
+};
