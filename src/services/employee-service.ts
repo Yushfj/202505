@@ -4,6 +4,8 @@ import { Pool, PoolClient } from 'pg'; // Ensure PoolClient is imported if used 
 import { query, getDbPool } from '@/lib/db';
 import { format, isValid as isDateValid, parseISO } from 'date-fns';
 import { randomBytes } from 'crypto';
+// Remove nodemailer imports as email functionality is removed
+// import nodemailer from 'nodemailer';
 
 // --- Interfaces ---
 // Define the structure for an Employee object
@@ -80,6 +82,7 @@ export interface PayPeriodSummary {
  * @returns {Promise<Employee[]>} A promise that resolves with the array of employees.
  */
 export const getEmployees = async (includeInactive = false): Promise<Employee[]> => {
+  console.log("[EmployeeService] getEmployees called. includeInactive:", includeInactive); // Add log
   let queryString = `
     SELECT
       id,
@@ -106,7 +109,9 @@ export const getEmployees = async (includeInactive = false): Promise<Employee[]>
   queryString += ' ORDER BY branch, name;'; // Optional: order by branch then name
 
   try {
+    console.log("[EmployeeService] Executing query to fetch employees:", queryString.substring(0, 100) + "..."); // Log query start
     const result = await query(queryString);
+    console.log(`[EmployeeService] Fetched ${result.rowCount} employees.`); // Log result count
     // Ensure consistent data types, especially for boolean and potentially null values
      return result.rows.map(row => ({
         ...row,
@@ -121,7 +126,7 @@ export const getEmployees = async (includeInactive = false): Promise<Employee[]>
     })) as Employee[];
   } catch (error: any) {
     // Log the original error for better debugging
-    console.error('Detailed error fetching employees from database:', error.stack); // Log stack trace
+    console.error('[EmployeeService] Detailed error fetching employees from database:', error.stack); // Log stack trace
     let errorMessage = `Failed to fetch employees. DB Error: ${error.message || 'Unknown database error'}`;
     if (error.message?.includes('relation "employees1" does not exist')) {
         errorMessage = 'Failed to fetch employees. The "employees1" table does not seem to exist in the database. Please check the schema.';
@@ -195,7 +200,7 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
         // console.log(`Checking if FNPF No ${finalFnpfNo} already exists...`);
         const existingEmployee = await checkExistingFNPFNo(finalFnpfNo);
         if (existingEmployee) {
-             const errorMessage = `Duplicate FNPF Number: An employee with FNPF Number ${finalFnpfNo} already exists. Please use a different number.`;
+             const errorMessage = `Duplicate FNPF Number: An employee with FNPF Number ${finalFnpfNo} already exists (${existingEmployee.name}, ID: ${existingEmployee.id}). Please use a different number.`;
              console.error(errorMessage);
              throw new Error(errorMessage); // Make message more specific
         }
@@ -270,9 +275,9 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
 /**
  * Checks if an employee with the given FNPF number already exists.
  * @param {string | null} fnpfNo - The FNPF number to check. Returns null if fnpfNo is empty or null.
- * @returns {Promise<{ id: string } | null>} Employee object (id) if exists, null otherwise.
+ * @returns {Promise<{ id: string, name: string } | null>} Employee object (id, name) if exists, null otherwise.
  */
-export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: string } | null> => {
+export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: string, name: string } | null> => {
     // If FNPF is not eligible or number is empty/null, no need to check
     if (!fnpfNo || fnpfNo.trim() === '') {
         // console.log("Skipping FNPF check: No FNPF number provided.");
@@ -284,14 +289,14 @@ export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: 
 
     try {
         const result = await query(
-            `SELECT id FROM employees1 WHERE fnpf_no = $1 LIMIT 1;`,
+            `SELECT id, employee_name AS "name" FROM employees1 WHERE fnpf_no = $1 LIMIT 1;`, // Also fetch name
             [trimmedFnpfNo]
         );
         // console.log(`FNPF check query result: ${result.rowCount} rows found.`);
 
         if (result.rows.length > 0) {
-            // console.log(`FNPF number ${trimmedFnpfNo} found for employee ID: ${result.rows[0].id}`);
-            return { id: result.rows[0].id }; // Return an object indicating existence
+            // console.log(`FNPF number ${trimmedFnpfNo} found for employee: ${result.rows[0].name} (ID: ${result.rows[0].id})`);
+            return { id: result.rows[0].id, name: result.rows[0].name }; // Return an object indicating existence
         } else {
             // console.log(`FNPF number ${trimmedFnpfNo} is unique.`);
             return null; // FNPF number does not exist
@@ -656,15 +661,20 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
         // console.log(`Successfully saved ${wageRecords.length} associated wage records for approval ${approvalId}.`);
 
         // 3. Generate the approval link using NEXT_PUBLIC_BASE_URL
-        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Use env var or fallback
+        // Use the environment variable for the base URL or fallback to localhost for dev
+        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Ensure this is set
 
          // --- Validation and Warning for NEXT_PUBLIC_BASE_URL ---
          if (!baseURL) {
-            console.error("CRITICAL: NEXT_PUBLIC_BASE_URL environment variable is not set. Approval links will not work correctly in deployment. Please set it in your .env file (for local development) and in your Railway environment variables (for deployment) to your deployed application's public URL (e.g., https://your-app-name.railway.app). Using fallback: http://localhost:9002");
+            console.error("CRITICAL: NEXT_PUBLIC_BASE_URL environment variable is not set. Approval links will not work correctly in deployment. Please set it in your .env.local file (for local development) and in your Railway environment variables (for deployment) to your deployed application's public URL (e.g., https://your-app-name.railway.app). Using fallback: http://localhost:9002");
          } else if (baseURL.includes('localhost') && process.env.NODE_ENV === 'production') {
              console.warn("WARNING: NEXT_PUBLIC_BASE_URL is set to a localhost address in a production environment. Approval links will likely not work for external users. Ensure NEXT_PUBLIC_BASE_URL is set to the public URL of your deployed application in your hosting environment (e.g., Railway).");
          } else if (!baseURL.startsWith('http://') && !baseURL.startsWith('https://')) {
              console.warn(`WARNING: NEXT_PUBLIC_BASE_URL "${baseURL}" does not seem to be a valid URL. Approval links may not work. Please check the value in your environment variables.`);
+         } else if (baseURL.startsWith('postgresql://')) {
+              console.warn(`WARNING: NEXT_PUBLIC_BASE_URL "${baseURL}" looks like a database connection string, not a public URL for the application. Approval links will not work. Please set it to your application's public address.`);
+              // Optionally, throw an error or use a default fallback
+              // throw new Error("Invalid NEXT_PUBLIC_BASE_URL configured.");
          }
          // --- End Validation ---
 
@@ -691,6 +701,7 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
     }
 };
 
+// REMOVED sendApprovalEmail function as requested
 
 /**
  * Fetches wage records associated with a specific approval token.
@@ -699,12 +710,13 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
  */
 export const getWagesForApproval = async (token: string): Promise<{approval: WageApproval, records: WageRecord[]} | null> => {
     if (!token) {
-        console.warn("getWagesForApproval called without a token.");
+        console.warn("[EmployeeService] getWagesForApproval called without a token.");
         return null;
     }
-    console.log(`Fetching wages for approval token: ${token}`);
+    console.log(`[EmployeeService] Attempting to fetch wages for approval token: ${token}`);
 
     try {
+        console.log(`[EmployeeService] Querying wage_approvals for token: ${token}`);
         // 1. Find the approval record by token
         const approvalResult = await query(
             `SELECT id, token, TO_CHAR(date_from, 'YYYY-MM-DD') AS "dateFrom", TO_CHAR(date_to, 'YYYY-MM-DD') AS "dateTo", status, created_at, approved_at, declined_at, approved_by
@@ -713,29 +725,30 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
         );
 
         if (approvalResult.rows.length === 0) {
-            console.log(`No approval found for token: ${token}`);
+            console.log(`[EmployeeService] No approval found for token: ${token}`);
             throw new Error("Approval request not found or link is invalid."); // Throw specific error
         }
         const approval = approvalResult.rows[0] as WageApproval;
-        console.log(`Found approval record ID: ${approval.id}, Status: ${approval.status}`);
+        console.log(`[EmployeeService] Found approval record ID: ${approval.id}, Status: ${approval.status}`);
 
         // 2. Fetch the associated wage records using the approval ID
+        console.log(`[EmployeeService] Querying wage_records for approval_id: ${approval.id}`);
         const recordsResult = await query(
             `SELECT
-               wr.id, employee_id AS "employeeId", employee_name AS "employeeName", hourly_wage AS "hourlyWage",
-               total_hours AS "totalHours", hours_worked AS "hoursWorked", overtime_hours AS "overtimeHours",
-               meal_allowance AS "mealAllowance", fnpf_deduction AS "fnpfDeduction", other_deductions AS "otherDeductions",
-               gross_pay AS "grossPay", net_pay AS "netPay",
+               wr.id, wr.employee_id AS "employeeId", wr.employee_name AS "employeeName", wr.hourly_wage AS "hourlyWage",
+               wr.total_hours AS "totalHours", wr.hours_worked AS "hoursWorked", wr.overtime_hours AS "overtimeHours",
+               wr.meal_allowance AS "mealAllowance", wr.fnpf_deduction AS "fnpfDeduction", wr.other_deductions AS "otherDeductions",
+               wr.gross_pay AS "grossPay", wr.net_pay AS "netPay",
                TO_CHAR(wr.date_from, 'YYYY-MM-DD') AS "dateFrom", TO_CHAR(wr.date_to, 'YYYY-MM-DD') AS "dateTo",
                wr.created_at, wr.approval_id AS "approvalId", -- Include approval_id
                e.payment_method AS "paymentMethod" -- Include payment method
              FROM wage_records wr
              INNER JOIN employees1 e ON wr.employee_id = e.id -- Join with employees1 to get payment method
              WHERE wr.approval_id = $1
-             ORDER BY wr.employee_name;`,
+             ORDER BY wr.employee_name;`, // Use wr.employee_name for ordering
             [approval.id]
         );
-        console.log(`Found ${recordsResult.rowCount} wage records for approval ID ${approval.id}.`);
+        console.log(`[EmployeeService] Found ${recordsResult.rowCount} wage records for approval ID ${approval.id}.`);
 
          const records = recordsResult.rows.map(row => ({
              ...row,
@@ -750,10 +763,11 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
              netPay: Number(row.netPay) || 0,
          })) as WageRecord[];
 
+         console.log(`[EmployeeService] Successfully fetched approval and ${records.length} records for token ${token}.`);
         return { approval, records };
 
     } catch (error: any) {
-        console.error(`Error fetching wages for approval token ${token}:`, error.stack); // Log stack trace
+        console.error(`[EmployeeService] Error fetching wages for approval token ${token}:`, error.stack); // Log stack trace
         // Provide a more specific error message if possible
         let errorMessage = `Failed to fetch wages for approval.`;
         if (error instanceof Error && error.message.includes("Approval request not found")) {
@@ -762,9 +776,12 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
            errorMessage += ' Approval table not found.';
         } else if (error.message?.includes('relation "wage_records" does not exist')) {
            errorMessage += ' Wage records table not found.';
+         } else if (error.message?.includes('column reference "employee_name" is ambiguous')) {
+             errorMessage = `Database query failed: column reference "employee_name" is ambiguous. Please qualify the column name with its table alias (e.g., wr.employee_name or e.employee_name).`;
         } else {
            errorMessage += ` DB Error: ${error.message || 'Unknown error'}`;
         }
+        console.error(`[EmployeeService] Throwing error for token ${token}: ${errorMessage}`);
         throw new Error(errorMessage);
     }
 };
@@ -945,6 +962,7 @@ export const getPayPeriodSummaries = async (status: 'pending' | 'approved' | 'de
  * @param {Date | string | null} filterDateFrom - Optional start date for filtering.
  * @param {Date | string | null} filterDateTo - Optional end date for filtering.
  * @param {string | null} approvalStatus - Optional status to filter by ('pending', 'approved', 'declined').
+ * @param {string | null} approvalId - Optional approval ID to filter by.
  * @returns {Promise<WageRecord[]>} A promise resolving with the fetched records.
  */
 export const getWageRecords = async (
@@ -1060,6 +1078,7 @@ export const checkWageRecordsExistByDateRange = async (dateFrom: string, dateTo:
         throw new Error(`Failed to check wage records existence. DB Error: ${error.message || 'Unknown error'}`);
     }
 };
+
 
 /**
  * Updates the name of an employee in existing wage records when the employee's name is changed.

@@ -29,7 +29,7 @@ const ApproveWagesClient = () => {
     const token = searchParams ? searchParams.get('token') : null; // Safely access searchParams
     const { toast } = useToast();
 
-    const [isLoading, setIsLoading] = useState(true); // Overall loading
+    const [isLoading, setIsLoading] = useState(true); // Overall loading state
     const [isProcessing, setIsProcessing] = useState(false); // Processing approval/decline
     const [approvalData, setApprovalData] = useState<{ approval: WageApproval; records: WageRecord[] } | null>(null);
     const [employees, setEmployees] = useState<Employee[]>([]);
@@ -43,18 +43,18 @@ const ApproveWagesClient = () => {
     const [isLoggingIn, setIsLoggingIn] = useState(false); // Processing login
 
     const fetchAllData = useCallback(async () => {
-        console.log("fetchAllData called. Token:", token, "isLoggedIn:", isLoggedIn); // Debug log
+        console.log("[ApproveWagesClient] fetchAllData called. Token:", token, "isLoggedIn:", isLoggedIn); // Debug log
 
         if (!token) {
             setError('Invalid approval link: Missing token.');
             setIsLoading(false);
-            console.log("fetchAllData aborted: Missing token.");
+            console.log("[ApproveWagesClient] fetchAllData aborted: Missing token.");
             return;
         }
         // Only fetch if logged in
         if (!isLoggedIn) {
             setIsLoading(false); // Stop initial loading indicator if not logged in
-            console.log("fetchAllData aborted: Not logged in.");
+            console.log("[ApproveWagesClient] fetchAllData aborted: Not logged in.");
             return;
         }
 
@@ -62,38 +62,39 @@ const ApproveWagesClient = () => {
         setError(null);
         setApprovalData(null); // Reset data before fetching
         setDecision(null);     // Reset decision
-        console.log(`Fetching data for token: ${token}`); // Log token being used
+        console.log(`[ApproveWagesClient] Fetching data for token: ${token}`); // Log token being used
 
         try {
             // Fetch both approval data and employee details
-            console.log("Calling getWagesForApproval...");
+            console.log("[ApproveWagesClient] Calling getWagesForApproval...");
             const data = await getWagesForApproval(token);
-            console.log("getWagesForApproval response:", data);
+            console.log("[ApproveWagesClient] getWagesForApproval response received:", data ? `Approval ID: ${data.approval.id}, ${data.records.length} records` : 'No data');
 
              if (!data) {
-                 console.error("No data returned from getWagesForApproval for token:", token);
+                 console.error("[ApproveWagesClient] No data returned from getWagesForApproval for token:", token);
                  setError('Approval request not found or link is invalid.'); // More specific error
              } else {
                 // Check status *after* successfully fetching data
                  if (data.approval.status !== 'pending') {
-                     console.log(`Approval ${data.approval.id} already processed with status: ${data.approval.status}`);
+                     console.log(`[ApproveWagesClient] Approval ${data.approval.id} already processed with status: ${data.approval.status}`);
                      setError(`This request has already been ${data.approval.status}.`);
                      setDecision(data.approval.status); // Show final status
                  }
                  setApprovalData(data); // Set data even if already processed to show details
-                 console.log("Approval data set:", data);
+                 console.log("[ApproveWagesClient] Approval data set.");
 
                  // Fetch employees only if approval data was found
-                 console.log("Calling getEmployees...");
-                 const fetchedEmployees = await getEmployees(true); // Fetch all employees (active/inactive) to get payment method
-                 console.log("getEmployees response:", fetchedEmployees);
+                 console.log("[ApproveWagesClient] Calling getEmployees...");
+                 // Fetch all employees (active/inactive) to ensure we can get payment method for all records
+                 const fetchedEmployees = await getEmployees(true);
+                 console.log("[ApproveWagesClient] getEmployees response received:", fetchedEmployees ? `${fetchedEmployees.length} employees` : 'No employees');
                  setEmployees(fetchedEmployees || []); // Store employee data
-                 console.log("Employee data set.");
+                 console.log("[ApproveWagesClient] Employee data set.");
              }
 
         } catch (err: any) {
-            console.error("Error in fetchAllData:", err); // Log the full error object
-            console.error("Error stack trace:", err.stack); // Log the stack trace
+            console.error("[ApproveWagesClient] Error in fetchAllData:", err); // Log the full error object
+            console.error("[ApproveWagesClient] Error stack trace:", err.stack); // Log the stack trace
             // Provide a more user-friendly error based on common DB issues or service errors
             let userErrorMessage = 'Failed to load approval details.';
             if (err.message?.includes('password authentication failed')) {
@@ -105,26 +106,34 @@ const ApproveWagesClient = () => {
             } else if (err.message?.includes('Failed to fetch wages for approval')) {
                 userErrorMessage = err.message; // Use the specific message from the service
             } else if (err.message){ // Use the caught error message if available
-                 userErrorMessage = err.message;
+                 userErrorMessage = `Error: ${err.message}`;
             }
-            setError(userErrorMessage);
+            setError(userErrorMessage); // Set the specific error message
         } finally {
             setIsLoading(false);
-            console.log("Finished fetchAllData process.");
+            console.log("[ApproveWagesClient] Finished fetchAllData process.");
         }
-    }, [token, isLoggedIn, toast]); // Added toast as dependency
+    }, [token, isLoggedIn, toast]); // Add toast as dependency
 
     // Trigger data fetching once logged in and token is available
     useEffect(() => {
-        console.log("Login status changed. isLoggedIn:", isLoggedIn, "Token available:", !!token);
+        console.log("[ApproveWagesClient] useEffect triggered. isLoggedIn:", isLoggedIn, "Token available:", !!token, "isLoading:", isLoading);
         if (isLoggedIn && token) {
             fetchAllData();
         } else if (!token && !isLoading) { // Handle case where token is missing initially
+             console.log("[ApproveWagesClient] useEffect: Setting error for missing token.");
              setError('Invalid approval link: Missing token.');
              setIsLoading(false);
+        } else if (isLoggedIn && !token) {
+             console.log("[ApproveWagesClient] useEffect: Logged in but token missing.");
+             setError('Invalid approval link: Missing token.');
+             setIsLoading(false);
+        } else if (!isLoggedIn) {
+             console.log("[ApproveWagesClient] useEffect: Not logged in, waiting for login.");
+             // Optionally reset loading if it was stuck true without login
+             if (isLoading) setIsLoading(false);
         }
     }, [isLoggedIn, token, fetchAllData, isLoading]); // Add isLoading to prevent redundant calls
-
 
     const handleLogin = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -132,17 +141,17 @@ const ApproveWagesClient = () => {
 
         setIsLoggingIn(true);
         setLoginError(null);
-        console.log("Attempting login...");
+        console.log("[ApproveWagesClient] Attempting login...");
 
         // Simulate async check if needed, or just compare directly
-        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 300)); // Simulate small delay
 
         if (adminPassword === ADMIN_PASSWORD) {
-            console.log("Login successful.");
+            console.log("[ApproveWagesClient] Login successful.");
             setIsLoggedIn(true); // Set loggedIn state
             // Data fetching will be triggered by the useEffect above
         } else {
-            console.log("Login failed: Incorrect password.");
+            console.log("[ApproveWagesClient] Login failed: Incorrect password.");
             setLoginError('Incorrect admin password.');
             setIsLoggedIn(false); // Ensure logged out state
         }
@@ -153,12 +162,12 @@ const ApproveWagesClient = () => {
         if (!token || !approvalData || isProcessing || decision) return;
 
         setIsProcessing(true);
-        console.log(`Attempting to ${newStatus} wages for token: ${token}`);
+        console.log(`[ApproveWagesClient] Attempting to ${newStatus} wages for token: ${token}`);
         try {
             // Pass admin password for potential server-side verification if needed, or just use approverName
             const updatedApproval = await updateWageApprovalStatus(token, newStatus, 'Admin'); // Use 'Admin' or logged-in user
             if (updatedApproval) {
-                console.log(`Wages ${newStatus} successfully. Updated approval:`, updatedApproval);
+                console.log(`[ApproveWagesClient] Wages ${newStatus} successfully. Updated approval:`, updatedApproval);
                 setDecision(newStatus);
                 setApprovalData(prev => prev ? { ...prev, approval: updatedApproval } : null);
                 toast({
@@ -167,19 +176,19 @@ const ApproveWagesClient = () => {
                 });
             } else {
                 // Error handled inside updateWageApprovalStatus or token became invalid
-                console.error(`Failed to update status to ${newStatus}. updateWageApprovalStatus returned null.`);
+                console.error(`[ApproveWagesClient] Failed to update status to ${newStatus}. updateWageApprovalStatus returned null.`);
                 setError('Failed to update status. The request might have been processed already or the link is invalid.');
                 toast({ title: 'Error', description: 'Failed to update status. Please refresh.', variant: 'destructive' });
                 // Optionally try refetching, but the token might be gone if status changed
                 await fetchAllData(); // Attempt refetch to get latest state
             }
         } catch (err: any) {
-            console.error(`Error ${newStatus} wages:`, err);
+            console.error(`[ApproveWagesClient] Error ${newStatus} wages:`, err);
             setError(err.message || `Failed to ${newStatus} wages.`);
             toast({ title: 'Error', description: `Failed to ${newStatus} wages. ${err.message}`, variant: 'destructive' });
         } finally {
             setIsProcessing(false);
-            console.log(`Finished processing ${newStatus} decision.`);
+            console.log(`[ApproveWagesClient] Finished processing ${newStatus} decision.`);
         }
     };
 
@@ -200,6 +209,13 @@ const ApproveWagesClient = () => {
                             <AlertTriangle className="h-4 w-4" />
                             <AlertTitle>Login Failed</AlertTitle>
                             <AlertDescription>{loginError}</AlertDescription>
+                        </Alert>
+                    )}
+                     {error && !loginError && ( // Show general error if not a login-specific one
+                         <Alert variant="destructive" className="mb-4">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertTitle>Error</AlertTitle>
+                            <AlertDescription>{error}</AlertDescription>
                         </Alert>
                     )}
                     <form onSubmit={handleLogin} className="space-y-4">
@@ -226,7 +242,7 @@ const ApproveWagesClient = () => {
     };
 
     const renderApprovalContent = () => {
-        console.log("Rendering approval content. isLoading:", isLoading, "error:", error, "approvalData:", !!approvalData); // Debug log
+        console.log("[ApproveWagesClient] Rendering approval content. isLoading:", isLoading, "error:", error, "approvalData:", !!approvalData); // Debug log
 
         if (isLoading) {
             return (
@@ -251,12 +267,12 @@ const ApproveWagesClient = () => {
 
         if (!approvalData) {
              // This should ideally be caught by the error state now, but as a fallback:
-             console.log("Render Approval Fallback: No approval data available.");
+             console.log("[ApproveWagesClient] Render Approval Fallback: No approval data available.");
              return <div className="text-center py-10">Approval data not available. This might happen if the link is invalid, already processed, or there was an error during loading.</div>;
          }
 
         const { approval, records } = approvalData;
-         console.log("Rendering with approval status:", approval.status, "and", records.length, "records.");
+         console.log("[ApproveWagesClient] Rendering with approval status:", approval.status, "and", records.length, "records.");
 
         // Calculate Totals
         let totalNetPay = 0;
@@ -268,13 +284,13 @@ const ApproveWagesClient = () => {
             const employee = employees.find(emp => emp.id === record.employeeId);
             if (employee?.paymentMethod === 'online') {
                 totalNetOnline += record.netPay;
-            } else {
+            } else { // Assume cash if not online or employee not found
                 totalNetCash += record.netPay;
             }
         });
 
         const isFinalState = approval.status === 'approved' || approval.status === 'declined';
-         console.log("Is final state:", isFinalState);
+         console.log("[ApproveWagesClient] Is final state:", isFinalState);
 
         // Format dates safely
         const dateFromObj = approval.dateFrom ? parseISO(approval.dateFrom) : null;
@@ -397,7 +413,7 @@ const ApproveWagesClient = () => {
     };
 
     // Main render logic: Choose between login form and approval content
-    console.log("Final Render. isLoggedIn:", isLoggedIn);
+    console.log("[ApproveWagesClient] Final Render. isLoggedIn:", isLoggedIn);
     return (
         <div className="flex justify-center items-center min-h-screen bg-muted p-4">
             {/* Show login form or approval content based on login state */}
