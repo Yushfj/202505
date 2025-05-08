@@ -165,7 +165,7 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
     fnpfEligible,
   } = employeeData;
 
-  console.log('Received employee data for addEmployee:', employeeData); // Log received data
+  // console.log('Received employee data for addEmployee:', employeeData); // Log received data
 
   // Basic validation (can be expanded)
   if (!name || !position || !hourlyWage) {
@@ -185,26 +185,25 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
   const finalBankAccountNumber = paymentMethod === 'online' ? (bankAccountNumber?.trim() || null) : null; // Trim and ensure null
 
 
-  console.log('Data prepared for DB insert:', {
-      name, position, hourlyWageNumeric, finalFnpfNo, finalTinNo, finalBankCode, finalBankAccountNumber, paymentMethod, branch, fnpfEligible
-  });
+  // console.log('Data prepared for DB insert:', {
+  //     name, position, hourlyWageNumeric, finalFnpfNo, finalTinNo, finalBankCode, finalBankAccountNumber, paymentMethod, branch, fnpfEligible
+  // });
 
   try {
      // --- Check for existing FNPF Number before attempting to add ---
       if (finalFnpfNo) {
-        console.log(`Checking if FNPF No ${finalFnpfNo} already exists...`);
+        // console.log(`Checking if FNPF No ${finalFnpfNo} already exists...`);
         const existingEmployee = await checkExistingFNPFNo(finalFnpfNo);
         if (existingEmployee) {
-             const errorMessage = `Duplicate FNPF Number: ${finalFnpfNo}. Please use a different FNPF Number.`;
-             console.error(`Attempted to add employee with duplicate FNPF No: ${finalFnpfNo}`);
-             // Throw a specific error message that the frontend can check
+             const errorMessage = `Duplicate FNPF Number: An employee with FNPF Number ${finalFnpfNo} already exists. Please use a different number.`;
+             console.error(errorMessage);
              throw new Error(errorMessage); // Make message more specific
         }
-         console.log(`FNPF No ${finalFnpfNo} is unique. Proceeding...`);
+         // console.log(`FNPF No ${finalFnpfNo} is unique. Proceeding...`);
       }
       // --- End FNPF Check ---
 
-    console.log('Executing INSERT query into employees1...');
+    // console.log('Executing INSERT query into employees1...');
     const result = await query(
       `INSERT INTO employees1 (employee_name, position, hourly_wage, fnpf_no, tin_no, bank_code, bank_account_number, payment_method, branch, fnpf_eligible, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE) -- New employees are active by default
@@ -222,13 +221,13 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
         fnpfEligible,
       ]
     );
-    console.log('Query execution finished. Result:', result);
+    // console.log('Query execution finished. Result:', result);
 
     if (result.rows.length === 0) {
         console.error('Insert query did not return an ID.');
         throw new Error('Failed to create employee, no ID returned.');
     }
-    console.log('Employee added successfully with ID:', result.rows[0].id);
+    // console.log('Employee added successfully with ID:', result.rows[0].id);
     return result.rows[0].id; // Return the newly generated UUID from the DB
   } catch (error: any) {
     console.error('Detailed error adding employee to database:', error.stack); // Log stack trace
@@ -276,25 +275,25 @@ export const addEmployee = async (employeeData: Omit<Employee, 'id' | 'created_a
 export const checkExistingFNPFNo = async (fnpfNo: string | null): Promise<{ id: string } | null> => {
     // If FNPF is not eligible or number is empty/null, no need to check
     if (!fnpfNo || fnpfNo.trim() === '') {
-        console.log("Skipping FNPF check: No FNPF number provided.");
+        // console.log("Skipping FNPF check: No FNPF number provided.");
         return null;
     }
 
     const trimmedFnpfNo = fnpfNo.trim();
-    console.log(`Executing query to check for existing FNPF No: ${trimmedFnpfNo}`);
+    // console.log(`Executing query to check for existing FNPF No: ${trimmedFnpfNo}`);
 
     try {
         const result = await query(
             `SELECT id FROM employees1 WHERE fnpf_no = $1 LIMIT 1;`,
             [trimmedFnpfNo]
         );
-        console.log(`FNPF check query result: ${result.rowCount} rows found.`);
+        // console.log(`FNPF check query result: ${result.rowCount} rows found.`);
 
         if (result.rows.length > 0) {
-            console.log(`FNPF number ${trimmedFnpfNo} found for employee ID: ${result.rows[0].id}`);
+            // console.log(`FNPF number ${trimmedFnpfNo} found for employee ID: ${result.rows[0].id}`);
             return { id: result.rows[0].id }; // Return an object indicating existence
         } else {
-            console.log(`FNPF number ${trimmedFnpfNo} is unique.`);
+            // console.log(`FNPF number ${trimmedFnpfNo} is unique.`);
             return null; // FNPF number does not exist
         }
     } catch (error: any) {
@@ -400,14 +399,14 @@ export const updateEmployee = async (updatedEmployee: Omit<Employee, 'created_at
            // Throw an error if no rows were affected (employee not found)
            throw new Error(`Employee with ID ${id} not found for update.`);
        }
-       console.log(`Employee with ID ${id} updated successfully.`);
+       // console.log(`Employee with ID ${id} updated successfully.`);
 
        // 3. Update denormalized name in wage_records (important for consistency)
        const updateWageRecordsResult = await client.query(
            `UPDATE wage_records SET employee_name = $1 WHERE employee_id = $2;`,
            [name, id]
        );
-       console.log(`Updated employee name in ${updateWageRecordsResult.rowCount} wage records for employee ID ${id}.`);
+       // console.log(`Updated employee name in ${updateWageRecordsResult.rowCount} wage records for employee ID ${id}.`);
 
        await client.query('COMMIT'); // Commit the transaction
 
@@ -648,13 +647,13 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
             throw new Error('Failed to create wage approval record.');
         }
         const approvalId = approvalResult.rows[0].id;
-        console.log(`Created wage approval record ${approvalId} for period ${dateFrom}-${dateTo}.`);
+        // console.log(`Created wage approval record ${approvalId} for period ${dateFrom}-${dateTo}.`);
 
         // 2. Insert the associated wage_records with the approval_id using the helper function
         await saveWageRecordsForApproval(wageRecords, approvalId, client);
 
         await client.query('COMMIT');
-        console.log(`Successfully saved ${wageRecords.length} associated wage records for approval ${approvalId}.`);
+        // console.log(`Successfully saved ${wageRecords.length} associated wage records for approval ${approvalId}.`);
 
         // 3. Generate the approval link using NEXT_PUBLIC_BASE_URL
         const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Use env var or fallback
@@ -662,7 +661,7 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
          // --- Validation and Warning for NEXT_PUBLIC_BASE_URL ---
          if (!baseURL) {
             console.error("CRITICAL: NEXT_PUBLIC_BASE_URL environment variable is not set. Approval links will not work correctly in deployment. Please set it in your .env file (for local development) and in your Railway environment variables (for deployment) to your deployed application's public URL (e.g., https://your-app-name.railway.app). Using fallback: http://localhost:9002");
-         } else if (baseURL === 'http://localhost:9002' && process.env.NODE_ENV === 'production') {
+         } else if (baseURL.includes('localhost') && process.env.NODE_ENV === 'production') {
              console.warn("WARNING: NEXT_PUBLIC_BASE_URL is set to a localhost address in a production environment. Approval links will likely not work for external users. Ensure NEXT_PUBLIC_BASE_URL is set to the public URL of your deployed application in your hosting environment (e.g., Railway).");
          } else if (!baseURL.startsWith('http://') && !baseURL.startsWith('https://')) {
              console.warn(`WARNING: NEXT_PUBLIC_BASE_URL "${baseURL}" does not seem to be a valid URL. Approval links may not work. Please check the value in your environment variables.`);
@@ -699,7 +698,11 @@ export const requestWageApproval = async (wageRecords: Omit<WageRecord, 'id' | '
  * @returns {Promise<{approval: WageApproval, records: WageRecord[]} | null>} Approval details and associated records, or null if token not found or invalid.
  */
 export const getWagesForApproval = async (token: string): Promise<{approval: WageApproval, records: WageRecord[]} | null> => {
-    if (!token) return null;
+    if (!token) {
+        console.warn("getWagesForApproval called without a token.");
+        return null;
+    }
+    console.log(`Fetching wages for approval token: ${token}`);
 
     try {
         // 1. Find the approval record by token
@@ -711,10 +714,10 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
 
         if (approvalResult.rows.length === 0) {
             console.log(`No approval found for token: ${token}`);
-            return null; // Token not found
+            throw new Error("Approval request not found or link is invalid."); // Throw specific error
         }
         const approval = approvalResult.rows[0] as WageApproval;
-
+        console.log(`Found approval record ID: ${approval.id}, Status: ${approval.status}`);
 
         // 2. Fetch the associated wage records using the approval ID
         const recordsResult = await query(
@@ -732,6 +735,7 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
              ORDER BY wr.employee_name;`,
             [approval.id]
         );
+        console.log(`Found ${recordsResult.rowCount} wage records for approval ID ${approval.id}.`);
 
          const records = recordsResult.rows.map(row => ({
              ...row,
@@ -752,7 +756,9 @@ export const getWagesForApproval = async (token: string): Promise<{approval: Wag
         console.error(`Error fetching wages for approval token ${token}:`, error.stack); // Log stack trace
         // Provide a more specific error message if possible
         let errorMessage = `Failed to fetch wages for approval.`;
-        if (error.message?.includes('relation "wage_approvals" does not exist')) {
+        if (error instanceof Error && error.message.includes("Approval request not found")) {
+            errorMessage = error.message; // Use the specific error thrown above
+        } else if (error.message?.includes('relation "wage_approvals" does not exist')) {
            errorMessage += ' Approval table not found.';
         } else if (error.message?.includes('relation "wage_records" does not exist')) {
            errorMessage += ' Wage records table not found.';
@@ -965,7 +971,7 @@ export const getWageRecords = async (
       TO_CHAR(wr.date_to, 'YYYY-MM-DD') AS "dateTo",
       wr.created_at,
       wr.approval_id AS "approvalId", -- Include approval_id
-      e.payment_method AS "paymentMethod",   -- Include approval status
+      e.payment_method AS "paymentMethod",   -- Include payment method
       e.fnpf_eligible AS "fnpfEligible" -- Include FNPF eligibility
     FROM wage_records wr
     INNER JOIN employees1 e ON wr.employee_id = e.id

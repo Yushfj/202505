@@ -47,37 +47,50 @@ const ApproveWagesClient = () => {
 
         setIsLoading(true);
         setError(null);
+        console.log(`Fetching data for token: ${token}`); // Log token being used
+
         try {
             // Fetch both approval data and employee details
-            const [data, fetchedEmployees] = await Promise.all([
-                getWagesForApproval(token),
-                getEmployees(true) // Fetch all employees (active/inactive) to get payment method
-            ]);
+             console.log("Calling getWagesForApproval...");
+            const data = await getWagesForApproval(token);
+            console.log("getWagesForApproval response:", data);
+
+            console.log("Calling getEmployees...");
+            const fetchedEmployees = await getEmployees(true); // Fetch all employees (active/inactive) to get payment method
+            console.log("getEmployees response:", fetchedEmployees);
+
 
             if (!data) {
-                setError('Approval request not found or already processed.');
+                console.error("No data returned from getWagesForApproval for token:", token);
+                setError('Approval request not found or link is invalid.'); // More specific error
             } else if (data.approval.status !== 'pending') {
+                 console.log(`Approval ${data.approval.id} already processed with status: ${data.approval.status}`);
                  setError(`This request has already been ${data.approval.status}.`);
                  setDecision(data.approval.status); // Show final status
             } else {
                 setApprovalData(data);
+                console.log("Approval data set successfully.");
             }
             setEmployees(fetchedEmployees || []); // Store employee data
+            console.log("Employee data set.");
 
         } catch (err: any) {
-            console.error("Error fetching approval or employee data:", err);
-            // Provide a more user-friendly error based on common DB issues
+            console.error("Error fetching approval or employee data:", err.stack); // Log the full stack trace
+            // Provide a more user-friendly error based on common DB issues or service errors
             let userErrorMessage = 'Failed to load approval details.';
              if (err.message?.includes('password authentication failed')) {
-                 userErrorMessage = 'Database connection failed. Please contact support.';
+                 userErrorMessage = 'Database connection failed. Please check server logs.';
              } else if (err.message?.includes('table not found')) {
-                userErrorMessage = 'Database error: Required table missing. Please contact support.';
+                userErrorMessage = 'Database error: Required table missing. Please check server logs.';
+             } else if (err.message?.includes('Approval request not found') || err.message?.includes('Invalid approval link')) {
+                 userErrorMessage = err.message; // Use the specific message from the service
              } else if (err.message?.includes('Failed to fetch wages for approval')) {
-                userErrorMessage = err.message; // Show the specific message from the service
+                 userErrorMessage = err.message; // Use the specific message from the service
              }
              setError(userErrorMessage);
         } finally {
             setIsLoading(false);
+            console.log("Finished fetchAllData process.");
         }
     }, [token, isLoggedIn]); // Add isLoggedIn dependency
 
@@ -123,14 +136,11 @@ const ApproveWagesClient = () => {
                     description: `The wage records for this period have been ${newStatus}.`,
                 });
             } else {
-                setError('Failed to update status. The request might have been processed already.');
-                toast({ title: 'Error', description: 'Failed to update status.', variant: 'destructive' });
-                // Refetch to get the latest status
-                 const latestData = await getWagesForApproval(token);
-                 if (latestData) {
-                    setApprovalData(latestData);
-                    setDecision(latestData.approval.status);
-                 }
+                // Error handled inside updateWageApprovalStatus or token became invalid
+                 setError('Failed to update status. The request might have been processed already or the link is invalid.');
+                 toast({ title: 'Error', description: 'Failed to update status. Please refresh.', variant: 'destructive' });
+                 // Optionally try refetching, but the token might be gone if status changed
+                 await fetchAllData(); // Attempt refetch to get latest state
             }
         } catch (err: any) {
             console.error(`Error ${newStatus} wages:`, err);
@@ -193,19 +203,21 @@ const ApproveWagesClient = () => {
             );
         }
 
+        // Render error state *before* checking approvalData
         if (error) {
             return (
                 <div className="text-center py-10 text-red-600">
                     <AlertTriangle className="h-10 w-10 mx-auto mb-3" />
                     <p className="text-xl font-semibold">Error Loading Approval</p>
                     <p className="text-base">{error}</p>
-                     <p className="text-sm mt-4 text-muted-foreground">If the problem persists, please contact support.</p>
+                     <p className="text-sm mt-4 text-muted-foreground">If the problem persists, please contact support or check the server logs.</p>
                 </div>
             );
         }
 
         if (!approvalData) {
-             return <div className="text-center py-10">Approval data not available.</div>;
+             // This should ideally be caught by the error state now, but as a fallback:
+             return <div className="text-center py-10">Approval data not available. This might happen if the link is invalid or already processed.</div>;
          }
 
         const { approval, records } = approvalData;
@@ -233,7 +245,8 @@ const ApproveWagesClient = () => {
         const formattedDateFrom = dateFromObj && isValid(dateFromObj) ? format(dateFromObj, 'MMM dd, yyyy') : 'Invalid Date';
         const formattedDateTo = dateToObj && isValid(dateToObj) ? format(dateToObj, 'MMM dd, yyyy') : 'Invalid Date';
         const decisionTimestamp = approval.approved_at || approval.declined_at;
-        const decisionDateObj = decisionTimestamp ? parseISO(decisionTimestamp as unknown as string) : null;
+        // Ensure timestamp is treated as string if it comes from DB
+        const decisionDateObj = decisionTimestamp ? parseISO(String(decisionTimestamp)) : null;
         const formattedDecisionDate = decisionDateObj && isValid(decisionDateObj) ? format(decisionDateObj, 'MMM dd, yyyy') : '';
 
 
