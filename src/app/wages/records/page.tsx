@@ -1,4 +1,3 @@
-
 'use client';
 
 import {useEffect, useState, useCallback} from 'react';
@@ -18,29 +17,28 @@ import {Calendar} from '@/components/ui/calendar';
 import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
 import {cn} from '@/lib/utils';
 import {format, isValid as isDateValid, parseISO} from 'date-fns'; // Use alias
-import {CalendarIcon, Home, ArrowLeft, Trash2, FileText, FileDown, Loader2, CheckCircle, XCircle, AlertTriangle, Copy, FileType, Mail, RefreshCw, Download } from 'lucide-react'; // Added Download icon
+import {CalendarIcon, Home, ArrowLeft, Trash2, FileText, FileDown, Loader2, CheckCircle, XCircle, AlertTriangle, Copy, FileType, Mail, RefreshCw, Download, Edit2 } from 'lucide-react'; // Added Edit2 icon
 import {DateRange} from 'react-day-picker';
 import { useToast } from '@/hooks/use-toast';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Import Tabs components
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; 
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
-  AlertDialogFooter, // Ensure AlertDialogFooter is imported
+  AlertDialogFooter, 
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {useRouter} from 'next/navigation';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf'; // Import jsPDF
-import autoTable from 'jspdf-autotable'; // Import autoTable for better table generation
+import jsPDF from 'jspdf'; 
+import autoTable from 'jspdf-autotable'; 
 
 // Import DB service functions for employees and wages
-import { getEmployees, getWageRecords, deleteWageRecordsByApprovalId, getPayPeriodSummaries, requestWageApproval, type PayPeriodSummary, type Employee, type WageRecord } from '@/services/employee-service'; // Use requestWageApproval
+import { getEmployees, getWageRecords, deleteWageRecordsByApprovalId, getPayPeriodSummaries, requestWageApproval, type PayPeriodSummary, type Employee, type WageRecord } from '@/services/employee-service'; 
 
 // --- Component ---
 const WagesRecordsPage = () => {
@@ -50,22 +48,22 @@ const WagesRecordsPage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); // Combined processing state
-  const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null); // ID of the period selected for details/actions
-  const [selectedStatus, setSelectedStatus] = useState<'approved' | 'declined' | 'pending'>('approved'); // Track current tab status
+  const [isProcessing, setIsProcessing] = useState(false); 
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null); 
+  const [selectedStatus, setSelectedStatus] = useState<'approved' | 'declined' | 'pending'>('approved'); 
   const [deletePassword, setDeletePassword] = useState('');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [actionType, setActionType] = useState<'delete' | null>(null); // Simplified actionType
+  const [actionType, setActionType] = useState<'delete' | null>(null); 
   const {toast} = useToast();
   const router = useRouter();
-  const ADMIN_PASSWORD = 'admin01'; // Store securely
+  const ADMIN_PASSWORD = 'admin01'; 
 
   // --- Data Fetching ---
   const fetchInitialData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [fetchedEmployees, approvedPeriods, declinedPeriods, pendingPeriods] = await Promise.all([
-          getEmployees(true), // Fetch all employees (active and inactive) to display details correctly
+          getEmployees(true), 
           getPayPeriodSummaries('approved'),
           getPayPeriodSummaries('declined'),
           getPayPeriodSummaries('pending'),
@@ -76,7 +74,6 @@ const WagesRecordsPage = () => {
           declined: declinedPeriods,
           pending: pendingPeriods,
       });
-      // Reset selected period details when fetching initial list
       setSelectedApprovalId(null);
       setSelectedPeriodRecords([]);
     } catch (error: any) {
@@ -96,12 +93,10 @@ const WagesRecordsPage = () => {
   // --- Fetch Details for Selected Period ---
   const fetchPeriodDetails = useCallback(async (approvalId: string) => {
       if (!approvalId) return;
-      setIsLoading(true); // Indicate loading details
+      setIsLoading(true); 
       try {
-          // Fetch records specifically for this approval ID using getWageRecords
-          // Determine the status from the fetched summaries
            const selectedPeriodSummary = [...payPeriodSummaries.approved, ...payPeriodSummaries.pending, ...payPeriodSummaries.declined].find(p => p.approvalId === approvalId);
-           const statusToFetch = selectedPeriodSummary?.status || null; // Get the status or null
+           const statusToFetch = selectedPeriodSummary?.status || null; 
 
            if (!statusToFetch) {
                throw new Error("Could not determine the status of the selected period.");
@@ -110,9 +105,7 @@ const WagesRecordsPage = () => {
            const periodRecords = await getWageRecords(null, null, statusToFetch, approvalId);
 
 
-          // Ensure dates are strings in YYYY-MM-DD format and numeric types are correct
           const parsedRecords = periodRecords.map(record => {
-              // Ensure dateFrom and dateTo are valid before attempting to parse
                 let dateFromStr = 'Invalid Date';
                 let dateToStr = 'Invalid Date';
 
@@ -132,8 +125,6 @@ const WagesRecordsPage = () => {
 
               if (dateFromStr === 'Invalid Date' || dateToStr === 'Invalid Date') {
                   console.warn("Invalid date encountered in record:", record);
-                  // Consider how to handle invalid dates - skip, default, or show error?
-                  // For now, we'll keep the 'Invalid Date' string.
               }
 
               return {
@@ -150,28 +141,26 @@ const WagesRecordsPage = () => {
                   dateFrom: dateFromStr,
                   dateTo: dateToStr,
               };
-          }) as WageRecord[]; // Assert the type after mapping
+          }) as WageRecord[]; 
 
 
           setSelectedPeriodRecords(parsedRecords);
       } catch (error: any) {
           console.error(`Error fetching details for approval ID ${approvalId}:`, error);
           toast({ title: "Error", description: `Failed to load details for the selected period. ${error.message}`, variant: "destructive" });
-          setSelectedPeriodRecords([]); // Clear details on error
+          setSelectedPeriodRecords([]); 
       } finally {
           setIsLoading(false);
       }
-  }, [toast, payPeriodSummaries]); // Add payPeriodSummaries dependency
+  }, [toast, payPeriodSummaries]); 
 
   // --- Event Handlers ---
   const handlePeriodSelect = (approvalId: string) => {
-    // If clicking the same period again, deselect; otherwise, select and fetch details
     if (selectedApprovalId === approvalId) {
         setSelectedApprovalId(null);
         setSelectedPeriodRecords([]);
     } else {
         setSelectedApprovalId(approvalId);
-        // Fetch details regardless of the current tab, as selection implies viewing details
         fetchPeriodDetails(approvalId);
     }
   };
@@ -179,26 +168,23 @@ const WagesRecordsPage = () => {
   const handleTabChange = (status: string) => {
       const validStatus = status as 'approved' | 'declined' | 'pending';
       setSelectedStatus(validStatus);
-      setSelectedApprovalId(null); // Deselect period when changing tabs
+      setSelectedApprovalId(null); 
       setSelectedPeriodRecords([]);
   };
 
-  // Triggered when delete button on a period is clicked
   const initiateDelete = (approvalId: string) => {
-      setSelectedApprovalId(approvalId); // Set the target approval ID for deletion
-      setActionType('delete'); // Set action type to delete
+      setSelectedApprovalId(approvalId); 
+      setActionType('delete'); 
       setShowDeleteDialog(true);
   };
 
-  // Define closeDialog function
   const closeDialog = () => {
     setShowDeleteDialog(false);
     setSelectedApprovalId(null);
-    setDeletePassword(''); // Reset password input
-    setActionType(null); // Reset action type
+    setDeletePassword(''); 
+    setActionType(null); 
   };
 
-  // Handle deletion confirmed via dialog
   const handleDeleteRecords = async () => {
     if (!selectedApprovalId) {
       toast({ title: 'Error', description: 'No pay period selected for deletion.', variant: 'destructive' });
@@ -214,19 +200,16 @@ const WagesRecordsPage = () => {
     }
 
     setIsDeleting(true);
-    setIsProcessing(true); // Indicate processing started
+    setIsProcessing(true); 
 
     try {
-        // Call service function to delete records using the approval ID
         await deleteWageRecordsByApprovalId(selectedApprovalId);
 
         toast({ title: 'Success', description: 'Wage records deleted successfully!' });
         console.log(`Wage records for approval ID ${selectedApprovalId} deleted successfully!`);
 
-        // Refetch the list of periods to update the UI
         await fetchInitialData();
-        // Reset selection state
-        closeDialog(); // Use the closeDialog function
+        closeDialog(); 
 
     } catch (error: any) {
         console.error(`Error deleting records for approval ID ${selectedApprovalId}:`, error);
@@ -237,19 +220,16 @@ const WagesRecordsPage = () => {
         });
     } finally {
        setIsDeleting(false);
-       setIsProcessing(false); // Indicate processing finished
-       // closeDialog(); // Also call closeDialog in finally if needed
-       setShowDeleteDialog(false); // Explicitly hide dialog
+       setIsProcessing(false); 
+       setShowDeleteDialog(false); 
        setDeletePassword('');
-       setSelectedApprovalId(null); // Clear selection
+       setSelectedApprovalId(null); 
     }
   };
 
-   // Function to generate the approval link
    const generateApprovalLink = (token: string | undefined): string | null => {
         if (!token) return null;
-        // Use the environment variable for the base URL or fallback to localhost for dev
-        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; // Ensure this is set
+        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; 
 
         if (!baseURL) {
              console.warn("Warning: NEXT_PUBLIC_BASE_URL is not set. Using fallback http://localhost:9002. Approval links may not work in deployed environments.");
@@ -257,13 +237,11 @@ const WagesRecordsPage = () => {
              console.warn("Warning: NEXT_PUBLIC_BASE_URL is set to localhost in production. Ensure it's set to the deployed application's public URL in your hosting environment (e.g., Railway).");
          }
 
-        // Construct the link path carefully
-        const path = '/approve-wages'; // Ensure leading slash
+        const path = '/approve-wages'; 
         const cleanBaseURL = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL;
         return `${cleanBaseURL}${path}?token=${token}`;
   };
 
-  // Function to handle copying the approval link
     const handleApprovalLinkAction = async (approvalId: string, token: string | undefined) => {
         if (!token) {
             toast({ title: 'Error', description: 'Approval token is missing for this period.', variant: 'destructive' });
@@ -298,7 +276,6 @@ const WagesRecordsPage = () => {
          return;
      }
 
-    // Use the currently loaded selectedPeriodRecords
     const recordsToExport = selectedPeriodRecords;
 
     if (recordsToExport.length === 0) {
@@ -313,7 +290,6 @@ const WagesRecordsPage = () => {
          console.error('Could not find selected period details.');
          return;
      }
-    // Use parseISO to handle YYYY-MM-DD strings, then format
     const dateFromObj = parseISO(selectedGroup.dateFrom);
     const dateToObj = parseISO(selectedGroup.dateTo);
 
@@ -343,7 +319,7 @@ const WagesRecordsPage = () => {
     let fileName = `${fileNameBase}_${formatType}.csv`;
 
     if (formatType === 'BSP') {
-        const csvRows: string[] = []; // No header for BSP
+        const csvRows: string[] = []; 
         onlineTransferRecords.forEach(record => {
             const employeeDetails = employees.find(emp => emp.id === record.employeeId);
             csvRows.push([
@@ -355,20 +331,19 @@ const WagesRecordsPage = () => {
             ].join(','));
         });
         csvData = csvRows.join('\n');
-    } else { // BRED format
-        const csvRows: string[][] = []; // No headers for BRED export
+    } else { 
+        const csvRows: string[][] = []; 
         onlineTransferRecords.forEach(record => {
             const employeeDetails = employees.find(emp => emp.id === record.employeeId);
             csvRows.push([
-                employeeDetails?.bankCode || '', // BIC
-                record.employeeName,             // Employee
-                '',                              // Employee 2
-                employeeDetails?.bankAccountNumber || '', // Account N
-                record.netPay.toFixed(2),        // Amount
-                'Salary',                        // Purpose
+                employeeDetails?.bankCode || '', 
+                record.employeeName,             
+                '',                              
+                employeeDetails?.bankAccountNumber || '', 
+                record.netPay.toFixed(2),        
+                'Salary',                        
             ]);
         });
-        // Convert array of arrays to CSV string
          csvData = csvRows.map(row => row.join(',')).join('\n');
     }
 
@@ -401,7 +376,6 @@ const WagesRecordsPage = () => {
           toast({ title: 'Error', description: 'Could not find selected period details.', variant: 'destructive' });
           return;
       }
-       // Use parseISO for date strings
        const dateFromObj = parseISO(selectedGroup.dateFrom);
        const dateToObj = parseISO(selectedGroup.dateTo);
 
@@ -411,72 +385,59 @@ const WagesRecordsPage = () => {
        }
 
        const doc = new jsPDF({
-          orientation: 'p', // portrait
-          unit: 'mm', // millimeters
-          format: 'a4' // standard A4 size
+          orientation: 'p', 
+          unit: 'mm', 
+          format: 'a4' 
        });
 
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 15;
       const companyName = "Lal's Motor Winders (FIJI) PTE Limited";
-      // Updated Address and Contact
       const companyAddress = "Nanuku Street, Labasa, Fiji";
       const companyContact = "Phone: +679 9926898";
       const payPeriodStr = `${format(dateFromObj, 'dd/MM/yyyy')} - ${format(dateToObj, 'dd/MM/yyyy')}`;
 
-      const payslipHeight = (pageHeight / 2) - (margin/2); // Allocate half the page height per payslip, adjusted for potential margin
+      const payslipHeight = (pageHeight / 2) - (margin/2); 
       const contentWidth = pageWidth - 2 * margin;
 
-      // Placeholder for logo - Loading image data in this context can be complex.
-      // Ideally, load the image data (e.g., base64) elsewhere and pass it here.
-      // For now, we'll just position the text assuming a logo might be there.
-      const logoWidth = 20; // Adjust as needed
-      const logoHeight = 10; // Adjust as needed
+      const logoWidth = 20; 
+      const logoHeight = 10; 
 
       const drawPayslip = (record: WageRecord, employee: Employee | undefined, startY: number): number => {
-           if (!employee) return startY; // Skip if employee details not found
+           if (!employee) return startY; 
 
-           let currentY = startY + 5; // Start Y for this payslip with top padding
+           let currentY = startY + 5; 
 
-           // --- Company Header with Logo Placeholder ---
             try {
-                // Attempt to add logo. If 'logoData' is not defined or invalid, this might fail.
-                // Make sure logoData (base64 string) is correctly loaded and available here.
-                // For example: const logoData = 'data:image/png;base64,...';
-                // Uncomment the following line if logoData is ready:
-                // doc.addImage(logoData, 'PNG', margin, currentY - 5, logoWidth, logoHeight);
+                 // Add logo using public path if available
+                // doc.addImage("/logo.png", 'PNG', margin, currentY - 5, logoWidth, logoHeight);
             } catch (e) {
-                console.error("Error adding logo to PDF, ensure logoData is a valid base64 string.", e);
-                 // Optionally, draw a placeholder box if logo fails
+                console.error("Error adding logo to PDF. Ensure logo.png is in public folder.", e);
                 doc.rect(margin, currentY - 5, logoWidth, logoHeight);
                 doc.text("Logo", margin + logoWidth / 2, currentY, { align: 'center' });
             }
            doc.setFontSize(14);
            doc.setFont('helvetica', 'bold');
-           // Adjust text position to account for logo width if added
-           doc.text(companyName, margin + logoWidth + 5, currentY, { align: 'left' }); // Example adjustment
-           // Or center the text if logo is placed differently
-           // doc.text(companyName, pageWidth / 2, currentY, { align: 'center' });
+           doc.text(companyName, margin + logoWidth + 5, currentY, { align: 'left' }); 
            currentY += 5;
            doc.setFontSize(9);
            doc.setFont('helvetica', 'normal');
-           doc.text(companyAddress, margin + logoWidth + 5, currentY, { align: 'left' }); // Example adjustment
+           doc.text(companyAddress, margin + logoWidth + 5, currentY, { align: 'left' }); 
            currentY += 4;
-           doc.text(companyContact, margin + logoWidth + 5, currentY, { align: 'left' }); // Example adjustment
+           doc.text(companyContact, margin + logoWidth + 5, currentY, { align: 'left' }); 
            currentY += 6;
            doc.setFontSize(12);
            doc.setFont('helvetica', 'bold');
            doc.text('PAYSLIP', pageWidth / 2, currentY, { align: 'center' });
            currentY += 5;
            doc.setLineWidth(0.2);
-           doc.line(margin, currentY, pageWidth - margin, currentY); // Separator line
+           doc.line(margin, currentY, pageWidth - margin, currentY); 
            currentY += 6;
 
-           // --- Employee & Period Details ---
            doc.setFontSize(9);
            const col1X = margin;
-           const col2X = margin + contentWidth / 2 + 5; // Position for second column
+           const col2X = margin + contentWidth / 2 + 5; 
            let detailY = currentY;
 
            doc.setFont('helvetica', 'bold');
@@ -515,11 +476,10 @@ const WagesRecordsPage = () => {
            }
 
            currentY = detailY + 6;
-           doc.line(margin, currentY - 1, pageWidth - margin, currentY - 1); // Separator line
+           doc.line(margin, currentY - 1, pageWidth - margin, currentY - 1); 
            currentY += 2;
 
-           // --- Earnings & Deductions Table ---
-            let tableEndY = currentY; // Track Y position after tables
+            let tableEndY = currentY; 
             autoTable(doc, {
                 startY: currentY,
                 head: [['Description', 'Rate ($)', 'Hours', 'Amount ($)']],
@@ -540,10 +500,10 @@ const WagesRecordsPage = () => {
                 },
                 margin: { left: margin, right: margin },
                 tableWidth: 'auto',
-                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } // Update end Y position
+                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } 
              });
 
-             currentY = tableEndY + 1; // Space before deductions table
+             currentY = tableEndY + 1; 
 
              autoTable(doc, {
                 startY: currentY,
@@ -562,50 +522,46 @@ const WagesRecordsPage = () => {
                 },
                 margin: { left: margin, right: margin },
                 tableWidth: 'auto',
-                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } // Update end Y position
+                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } 
              });
 
              currentY = tableEndY + 6;
 
-             // --- Net Pay ---
              doc.setFontSize(10);
              doc.setFont('helvetica', 'bold');
              doc.text(`NET PAY: $${record.netPay.toFixed(2)}`, margin + contentWidth / 2, currentY, { align: 'center' });
              currentY += 5;
 
-             // --- Payment Method ---
              doc.setFontSize(8);
              doc.setFont('helvetica', 'italic');
              const paymentMethodText = `Payment Method: ${employee.paymentMethod === 'online' ? 'Online Transfer' : 'Cash'}`;
              doc.text(paymentMethodText, margin, currentY);
 
-             return currentY + 5; // Return the end Y position of this payslip
+             return currentY + 5; 
       };
 
       let payslipCounter = 0;
       selectedPeriodRecords.forEach((record, index) => {
            const employee = employees.find(emp => emp.id === record.employeeId);
            const isFirstOnPage = payslipCounter % 2 === 0;
-           const startY = isFirstOnPage ? margin : payslipHeight + (margin); // Start Y for the second payslip
+           const startY = isFirstOnPage ? margin : payslipHeight + (margin); 
 
            if (index > 0 && isFirstOnPage) {
-               doc.addPage(); // Add a new page before the first payslip of a new pair (except the very first one)
+               doc.addPage(); 
            }
 
            drawPayslip(record, employee, startY);
 
-            // Draw separator line only if it's the first payslip on the page and not the very last one
            if (isFirstOnPage && index < selectedPeriodRecords.length - 1) {
-               doc.setDrawColor(150); // Gray line
+               doc.setDrawColor(150); 
                doc.setLineWidth(0.3);
-               doc.line(margin, payslipHeight + margin/2 , pageWidth - margin, payslipHeight + margin/2); // Line in the middle margin
+               doc.line(margin, payslipHeight + margin/2 , pageWidth - margin, payslipHeight + margin/2); 
            }
 
            payslipCounter++;
       });
 
 
-      // --- Save the PDF ---
       const dateFromStrPdf = format(dateFromObj, 'yyyyMMdd');
       const dateToStrPdf = format(dateToObj, 'yyyyMMdd');
       const fileName = `payslips_${dateFromStrPdf}_${dateToStrPdf}.pdf`;
@@ -639,10 +595,8 @@ const WagesRecordsPage = () => {
           return;
       }
 
-      // Filter records for FNPF eligible employees
       const eligibleRecords = selectedPeriodRecords.filter(record => {
           const employee = employees.find(emp => emp.id === record.employeeId);
-          // Ensure employee exists and fnpfEligible is explicitly true
           return employee && employee.fnpfEligible === true;
       });
 
@@ -657,7 +611,7 @@ const WagesRecordsPage = () => {
       }
 
       const doc = new jsPDF({
-          orientation: 'l', // landscape
+          orientation: 'l', 
           unit: 'mm',
           format: 'a4'
       });
@@ -668,7 +622,6 @@ const WagesRecordsPage = () => {
       const title = `Wage Summary (FNPF Eligible) - ${format(dateFromObj, 'dd/MM/yyyy')} to ${format(dateToObj, 'dd/MM/yyyy')}`;
       let currentY = margin;
 
-      // --- Header ---
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
       doc.text(companyName, pageWidth / 2, currentY, { align: 'center' });
@@ -678,7 +631,6 @@ const WagesRecordsPage = () => {
       doc.text(title, pageWidth / 2, currentY, { align: 'center' });
       currentY += 10;
 
-      // --- Table ---
       const head = [["Name", "Total Hours", "Normal Hours", "O/T Hrs", "Meal", "FNPF", "Deduction", "Gross", "Net"]];
       const body = eligibleRecords.map(record => [
           record.employeeName,
@@ -692,7 +644,6 @@ const WagesRecordsPage = () => {
           record.netPay.toFixed(2),
       ]);
 
-       // Calculate Totals for Eligible Employees
        const totalEligibleFNPF = eligibleRecords.reduce((sum, r) => sum + r.fnpfDeduction, 0);
        const totalEligibleGross = eligibleRecords.reduce((sum, r) => sum + r.grossPay, 0);
        const totalEligibleNet = eligibleRecords.reduce((sum, r) => sum + r.netPay, 0);
@@ -703,7 +654,6 @@ const WagesRecordsPage = () => {
        const totalEligibleDeduction = eligibleRecords.reduce((sum, r) => sum + r.otherDeductions, 0);
 
 
-       // Add totals row to the body
        body.push([
            { content: 'Totals', styles: { fontStyle: 'bold', halign: 'right' } },
            { content: totalEligibleTotalHours.toFixed(2), styles: { fontStyle: 'bold' } },
@@ -721,32 +671,30 @@ const WagesRecordsPage = () => {
           startY: currentY,
           head: head,
           body: body,
-          theme: 'grid', // Use a theme like 'grid' or 'striped'
-          headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' }, // Example: blue header
+          theme: 'grid', 
+          headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' }, 
           styles: { fontSize: 8, cellPadding: 2 },
           columnStyles: {
-              // Adjust column widths if needed
-              0: { cellWidth: 'auto' }, // Name
-              1: { halign: 'right' }, // Total Hours
-              2: { halign: 'right' }, // Normal Hours
-              3: { halign: 'right' }, // O/T Hrs
-              4: { halign: 'right' }, // Meal
-              5: { halign: 'right' }, // FNPF
-              6: { halign: 'right' }, // Deduction
-              7: { halign: 'right' }, // Gross
-              8: { halign: 'right' }, // Net
+              0: { cellWidth: 'auto' }, 
+              1: { halign: 'right' }, 
+              2: { halign: 'right' }, 
+              3: { halign: 'right' }, 
+              4: { halign: 'right' }, 
+              5: { halign: 'right' }, 
+              6: { halign: 'right' }, 
+              7: { halign: 'right' }, 
+              8: { halign: 'right' }, 
           },
-           footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 0 }, // Style the footer row
-            didParseCell: (data) => { // Ensure last row (totals) gets footer style
+           footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 0 }, 
+            didParseCell: (data) => { 
                 if (data.row.index === body.length - 1) {
                     data.cell.styles.fontStyle = 'bold';
-                     data.cell.styles.fillColor = [230, 230, 230]; // Light gray background
-                     data.cell.styles.textColor = 0; // Black text
+                     data.cell.styles.fillColor = [230, 230, 230]; 
+                     data.cell.styles.textColor = 0; 
                 }
             }
       });
 
-      // --- Save the PDF ---
       const dateFromStrPdf = format(dateFromObj, 'yyyyMMdd');
       const dateToStrPdf = format(dateToObj, 'yyyyMMdd');
       const fileName = `wage_summary_${dateFromStrPdf}_${dateToStrPdf}.pdf`;
@@ -763,8 +711,8 @@ const WagesRecordsPage = () => {
                   <TableRow className="hover:bg-transparent">
                       <TableHead className="text-white border-r border-white/20">Pay Period</TableHead>
                       <TableHead className="text-white border-r border-white/20 text-right">Total Wages</TableHead>
-                      <TableHead className="text-white border-r border-white/20 text-right">Total Cash</TableHead> {/* New Header */}
-                      <TableHead className="text-white border-r border-white/20 text-right">Total Online</TableHead> {/* New Header */}
+                      <TableHead className="text-white border-r border-white/20 text-right">Total Cash</TableHead> 
+                      <TableHead className="text-white border-r border-white/20 text-right">Total Online</TableHead> 
                       <TableHead className="text-white text-center">Actions</TableHead>
                   </TableRow>
               </TableHeader>
@@ -780,26 +728,25 @@ const WagesRecordsPage = () => {
                     return (
                       <TableRow
                           key={period.approvalId}
-                          onClick={() => handlePeriodSelect(period.approvalId)} // Allow selecting any period now
+                          onClick={() => handlePeriodSelect(period.approvalId)} 
                           className={cn(
-                          "border-t border-white/10 hover:bg-white/15 cursor-pointer", // Always pointer
+                          "border-t border-white/10 hover:bg-white/15 cursor-pointer", 
                           selectedApprovalId === period.approvalId && "bg-white/25 font-semibold"
                           )}
                       >
                           <TableCell className="font-medium text-white border-r border-white/20">{formattedPeriod}</TableCell>
                           <TableCell className="text-white border-r border-white/20 text-right">${period.totalWages.toFixed(2)}</TableCell>
-                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalCashWages.toFixed(2)}</TableCell> {/* Display Cash Total */}
-                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalOnlineWages.toFixed(2)}</TableCell> {/* Display Online Total */}
+                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalCashWages.toFixed(2)}</TableCell> 
+                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalOnlineWages.toFixed(2)}</TableCell> 
                           <TableCell className="text-center">
-                              {/* Delete Button (available for all statuses) */}
                               <Button
                                   variant="destructive"
                                   size="sm"
                                   onClick={(e) => {
-                                        e.stopPropagation(); // Prevent row selection
+                                        e.stopPropagation(); 
                                         initiateDelete(period.approvalId);
                                   }}
-                                  className="h-7 px-2 mr-2" // Added margin-right
+                                  className="h-7 px-2 mr-2" 
                                   disabled={isDeleting && selectedApprovalId === period.approvalId}
                                   title="Delete Period Records"
                               >
@@ -807,25 +754,38 @@ const WagesRecordsPage = () => {
                                   <span className="sr-only">Delete Period</span>
                               </Button>
 
-                                {/* Copy Approval Link Button (only for pending) */}
                               {status === 'pending' && period.token && (
                                   <Button
                                       variant="outline"
                                       size="sm"
                                       onClick={(e) => {
-                                          e.stopPropagation(); // Prevent row selection
+                                          e.stopPropagation(); 
                                           handleApprovalLinkAction(period.approvalId, period.token);
                                       }}
-                                      className="h-7 px-2 text-white hover:bg-white/10 mr-2" // Added margin-right
+                                      className="h-7 px-2 text-white hover:bg-white/10 mr-2" 
                                       title="Copy Approval Link"
                                   >
                                       <Copy className="h-3.5 w-3.5" />
                                       <span className="sr-only">Copy Approval Link</span>
                                   </Button>
                               )}
+                               {/* Edit Button for Pending and Approved Records */}
+                              {(status === 'pending' || status === 'approved') && (
+                                <Link href={`/wages/edit?approvalId=${period.approvalId}`} passHref>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={(e) => e.stopPropagation()} // Prevent row selection
+                                        className="h-7 px-2 text-white hover:bg-white/10 mr-2"
+                                        title="Edit Wage Records"
+                                    >
+                                        <Edit2 className="h-3.5 w-3.5" />
+                                        <span className="sr-only">Edit Wage Records</span>
+                                    </Button>
+                                </Link>
+                              )}
 
 
-                                {/* Export & Download Buttons (only for approved status and if selected) */}
                                 {status === 'approved' && selectedApprovalId === period.approvalId && (
                                     <>
                                         <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleExport('BSP');}} className="h-7 px-2 mr-2 bg-blue-600 hover:bg-blue-700 text-white" title="Export BSP CSV">
@@ -834,11 +794,9 @@ const WagesRecordsPage = () => {
                                         <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleExport('BRED');}} className="h-7 px-2 mr-2 bg-red-600 hover:bg-red-700 text-white" title="Export BRED CSV">
                                             <FileDown className="h-3.5 w-3.5 mr-1" /> BRED
                                         </Button>
-                                         {/* Download Payslip Button */}
                                           <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleDownloadPayslips();}} className="h-7 px-2 mr-2 bg-purple-600 hover:bg-purple-700 text-white" title="Download Payslips PDF">
                                              <FileType className="h-3.5 w-3.5 mr-1" /> Payslips
                                          </Button>
-                                         {/* Download Summary PDF Button */}
                                          <Button
                                               variant="secondary"
                                               size="sm"
@@ -856,7 +814,7 @@ const WagesRecordsPage = () => {
                   })
               ) : (
                   <TableRow>
-                  <TableCell colSpan={5} className="text-center text-gray-400 py-4"> {/* Adjusted colSpan */}
+                  <TableCell colSpan={5} className="text-center text-gray-400 py-4"> 
                       No records found for this status.
                   </TableCell>
                   </TableRow>
@@ -910,7 +868,7 @@ const WagesRecordsPage = () => {
                  </TabsTrigger>
                </TabsList>
 
-               {isLoading && !selectedApprovalId ? ( // Show loading only when initially loading lists
+               {isLoading && !selectedApprovalId ? ( 
                  <div className="text-center text-white py-10 flex items-center justify-center">
                    <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading records list...
                  </div>
@@ -929,8 +887,7 @@ const WagesRecordsPage = () => {
                )}
              </Tabs>
 
-             {/* Wage Details Section (Visible when a period is selected) */}
-            {isLoading && selectedApprovalId && ( // Show loading specifically when fetching details
+            {isLoading && selectedApprovalId && ( 
                 <div className="text-center text-white py-10 flex items-center justify-center">
                     <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading period details...
                 </div>
@@ -939,8 +896,7 @@ const WagesRecordsPage = () => {
                <div className="mt-6">
                  <h3 className="text-lg font-medium text-white mb-4 text-center">
                    Wage Details for {
-                      // Find the selected period from any status list to display the date range
-                      (()=>{ // IIFE to find and format
+                      (()=>{ 
                             const period = [...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending]
                                             .find(g => g.approvalId === selectedApprovalId);
                             if (!period) return 'Selected Period';
@@ -994,7 +950,6 @@ const WagesRecordsPage = () => {
                            </TableRow>
                          );
                        })}
-                       {/* Add totals row for details table if needed */}
                        <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
                            <TableCell colSpan={11} className="text-right text-white pr-4 border-r border-white/20">
                                Total Net Pay:
@@ -1008,14 +963,12 @@ const WagesRecordsPage = () => {
                  </div>
                </div>
              )}
-             {/* Show message if details are loaded but empty */}
              {selectedApprovalId && !isLoading && selectedPeriodRecords.length === 0 && (
                  <div className="text-center text-gray-400 mt-6 py-4">
                      No wage records found for the selected period.
                  </div>
              )}
 
-              {/* Message when no period is selected and not loading */}
              {!selectedApprovalId && !isLoading && (
                  <div className="text-center text-gray-400 mt-6 py-4">
                      Select a pay period from the list above to view details or perform actions.
@@ -1026,7 +979,6 @@ const WagesRecordsPage = () => {
          </Card>
        </main>
 
-        {/* AlertDialog for delete confirmation */}
         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
             <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
               <AlertDialogHeader>
@@ -1053,8 +1005,7 @@ const WagesRecordsPage = () => {
                  <AlertDialogAction
                    onClick={handleDeleteRecords}
                    className={cn(
-                     // Use actionType to dynamically set button color
-                     actionType === 'delete' ? "bg-red-600 hover:bg-red-700" : "bg-yellow-600 hover:bg-yellow-700" // Fallback yellow, though only delete is used here
+                     actionType === 'delete' ? "bg-red-600 hover:bg-red-700" : "bg-yellow-600 hover:bg-yellow-700" 
                    )}
                    disabled={isProcessing}
                  >

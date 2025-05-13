@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -56,7 +57,7 @@ TableFooter.displayName = "TableFooter"
 const TableRow = React.forwardRef<
   HTMLTableRowElement,
   React.HTMLAttributes<HTMLTableRowElement>
->(({ className, children, ...props }, ref) => ( // Explicitly accept children
+>(({ className, children, ...props }, ref) => (
   <tr
     ref={ref}
     className={cn(
@@ -64,14 +65,14 @@ const TableRow = React.forwardRef<
       className
     )}
     {...props}
-  >{children}</tr> // Ensure no whitespace around children
+  >{children}</tr>
 ))
 TableRow.displayName = "TableRow"
 
 const TableHead = React.forwardRef<
   HTMLTableCellElement,
   React.ThHTMLAttributes<HTMLTableCellElement>
->(({ className, children, ...props }, ref) => ( // Explicitly accept children
+>(({ className, children, ...props }, ref) => (
   <th
     ref={ref}
     className={cn(
@@ -79,31 +80,31 @@ const TableHead = React.forwardRef<
       className
     )}
     {...props}
-  >{children}</th> // Ensure no whitespace around children
+  >{children}</th>
 ))
 TableHead.displayName = "TableHead"
 
 const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.TdHTMLAttributes<HTMLTableCellElement>
->(({ className, children, ...props }, ref) => ( // Explicitly accept children
+>(({ className, children, ...props }, ref) => (
   <td
     ref={ref}
     className={cn("p-4 align-middle [&:has([role=checkbox])]:pr-0", className)}
     {...props}
-  >{children}</td> // Ensure no whitespace around children
+  >{children}</td>
 ))
 TableCell.displayName = "TableCell"
 
 const TableCaption = React.forwardRef<
   HTMLTableCaptionElement,
   React.HTMLAttributes<HTMLTableCaptionElement>
->(({ className, children, ...props }, ref) => ( // Explicitly accept children
+>(({ className, children, ...props }, ref) => (
   <caption
     ref={ref}
     className={cn("mt-4 text-sm text-muted-foreground", className)}
     {...props}
-  >{children}</caption> // Ensure no whitespace around children
+  >{children}</caption>
 ))
 TableCaption.displayName = "TableCaption"
 
