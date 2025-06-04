@@ -56,9 +56,13 @@ const DashboardPage = () => {
 
       } catch (error: any) {
         console.error("Failed to fetch dashboard data:", error);
+        let description = error.message || "Could not load dashboard data.";
+        if (typeof error.message === 'string' && error.message.includes("An error occurred in the Server Components render")) {
+          description = "An unexpected error occurred while fetching data from the server. Please check server logs for more details or contact support. (Digest available in logs)";
+        }
         toast({
           title: "Error Fetching Data",
-          description: error.message || "Could not load dashboard data.",
+          description: description,
           variant: "destructive",
         });
       } finally {
