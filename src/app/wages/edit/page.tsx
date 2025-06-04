@@ -33,6 +33,7 @@ import {Label} from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getEmployees, getPayPeriodSummaries, getWageRecords, updateWageRecordsInApproval, type Employee, type WageRecord, type PayPeriodSummary, type UpdatedWageRecordData } from '@/services/employee-service';
+import { useRouter } from 'next/navigation';
 
 const STANDARD_NORMAL_HOURS_THRESHOLD = 45;
 const SPECIAL_EMPLOYEE_NAME = "Bimlesh Shashi Prakash";
@@ -55,6 +56,9 @@ interface EditableWageInputDetails {
 
 const EditWagesPage = () => {
   const {toast} = useToast();
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [authCheckLoading, setAuthCheckLoading] = useState(true);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payPeriods, setPayPeriods] = useState<PayPeriodSummary[]>([]);
   const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null);
@@ -76,14 +80,25 @@ const EditWagesPage = () => {
   const [totalMealAllowance, setTotalMealAllowance] = useState<number>(0);
   const [totalOtherDeductions, setTotalOtherDeductions] = useState<number>(0);
 
+  useEffect(() => {
+    const storedUser = localStorage.getItem('username');
+    if (!storedUser) {
+        router.replace('/');
+    } else if (storedUser === 'Priyanka Sharma') {
+        router.replace('/dashboard'); // Priyanka should not access this page
+    } else {
+        setCurrentUser(storedUser);
+        setAuthCheckLoading(false);
+    }
+  }, [router]);
 
   const fetchAllEmployeesAndPeriods = useCallback(async () => {
     setIsLoadingPeriods(true);
     try {
       const [fetchedEmployees, pendingPeriods, approvedPeriods] = await Promise.all([
-        getEmployees(true), // Fetch all employees to ensure data consistency
-        getPayPeriodSummaries('pending'),
-        getPayPeriodSummaries('approved')
+        getEmployees(true),
+        getPayPeriodSummaries('pending', 'final_wage'), // Explicitly fetch 'final_wage'
+        getPayPeriodSummaries('approved', 'final_wage')
       ]);
       setEmployees(fetchedEmployees);
       setPayPeriods([...pendingPeriods, ...approvedPeriods].sort((a, b) => parseISO(b.dateFrom).getTime() - parseISO(a.dateFrom).getTime()));
@@ -96,8 +111,8 @@ const EditWagesPage = () => {
   }, [toast]);
 
   useEffect(() => {
-    fetchAllEmployeesAndPeriods();
-  }, [fetchAllEmployeesAndPeriods]);
+    if (!authCheckLoading) fetchAllEmployeesAndPeriods();
+  }, [authCheckLoading, fetchAllEmployeesAndPeriods]);
 
   const handlePeriodSelect = async (approvalId: string) => {
     if (!approvalId) {
@@ -111,6 +126,10 @@ const EditWagesPage = () => {
     try {
         const selectedPeriod = payPeriods.find(p => p.approvalId === approvalId);
         if (!selectedPeriod) throw new Error("Selected period details not found.");
+        // Ensure we are fetching records associated with a 'final_wage' approval type
+        if (selectedPeriod.approval_type !== 'final_wage') {
+            throw new Error("Can only edit wage records for 'final_wage' approvals.");
+        }
         const fetchedRecords = await getWageRecords(null, null, selectedPeriod.status, approvalId);
         setRecordsToEdit(fetchedRecords);
 
@@ -170,7 +189,6 @@ const EditWagesPage = () => {
 
         const updatedInputs = { ...currentRecordInputs, [field]: validatedValue };
         
-        // Recalculate derived fields
         const recordToEdit = recordsToEdit.find(r => r.id === recordId);
         const employee = employees.find(emp => emp.id === recordToEdit?.employeeId);
         if (!employee || !recordToEdit) return prev;
@@ -260,7 +278,7 @@ const EditWagesPage = () => {
     try {
         await updateWageRecordsInApproval(selectedApprovalId!, updatedDataArray);
         toast({ title: "Success", description: "Wage records updated successfully. Approval status reset to pending." });
-        fetchAllEmployeesAndPeriods(); // Refresh lists
+        fetchAllEmployeesAndPeriods();
         setSelectedApprovalId(null);
         setRecordsToEdit([]);
         setEditableWageData({});
@@ -272,170 +290,178 @@ const EditWagesPage = () => {
     }
   };
 
+  if (authCheckLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-black/70">
+        <Loader2 className="h-12 w-12 animate-spin text-white" />
+      </div>
+    );
+  }
+
+
   return (
-    <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow min-h-screen text-white font-sans">
-      <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 bg-black/60 backdrop-blur-md">
-        <Link href="/wages" passHref className="ml-4">
-          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-            <ArrowLeft className="h-5 w-5" />
-            <span className="sr-only">Back to Wages Management</span>
-          </Button>
-        </Link>
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
-          Edit Wage Records
-        </h1>
-        <Link href="/dashboard" passHref className="mr-4">
-          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-            <Home className="h-5 w-5" />
-            <span className="sr-only">Dashboard</span>
-          </Button>
-        </Link>
-      </header>
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow min-h-screen text-white font-sans">
+        <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 bg-black/60 backdrop-blur-md">
+          <Link href="/wages" passHref className="ml-4">
+            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+              <ArrowLeft className="h-5 w-5" />
+              <span className="sr-only">Back to Wages Management</span>
+            </Button>
+          </Link>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 flex-grow">
+            Edit Wage Records
+          </h1>
+          <Link href="/dashboard" passHref className="mr-4">
+            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+              <Home className="h-5 w-5" />
+              <span className="sr-only">Dashboard</span>
+            </Button>
+          </Link>
+        </header>
 
-      <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6">
-        <Card className="w-full max-w-7xl bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 p-4">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-center text-white mb-4">Select Pay Period to Edit</CardTitle>
-            {isLoadingPeriods ? (
-                <div className="flex justify-center items-center py-4"><Loader2 className="h-6 w-6 animate-spin text-white"/> <span className="ml-2 text-white">Loading pay periods...</span></div>
-            ) : payPeriods.length === 0 ? (
-                <p className="text-center text-gray-400">No editable (pending or approved) pay periods found.</p>
-            ) : (
-              <Select onValueChange={handlePeriodSelect} value={selectedApprovalId || ''} disabled={isLoadingRecords || isSaving}>
-                <SelectTrigger className="w-full max-w-md mx-auto bg-white/10 text-white placeholder-gray-400 border-white/20">
-                  <SelectValue placeholder="Choose a pay period..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Pay Periods (Pending/Approved)</SelectLabel>
-                    {payPeriods.map(period => (
-                      <SelectItem key={period.approvalId} value={period.approvalId}>
-                        {format(parseISO(period.dateFrom), 'MMM dd, yyyy')} - {format(parseISO(period.dateTo), 'MMM dd, yyyy')} ({period.status})
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            )}
-          </CardHeader>
-          <CardContent>
-            {isLoadingRecords && (
-                <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-white"/> <span className="ml-3 text-lg text-white">Loading records...</span></div>
-            )}
+        <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6">
+          <Card className="w-full max-w-7xl bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 p-4">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-center text-white mb-4">Select Pay Period to Edit</CardTitle>
+              {isLoadingPeriods ? (
+                  <div className="flex justify-center items-center py-4"><Loader2 className="h-6 w-6 animate-spin text-white"/> <span className="ml-2 text-white">Loading pay periods...</span></div>
+              ) : payPeriods.length === 0 ? (
+                  <p className="text-center text-gray-400">No editable (pending or approved) pay periods found.</p>
+              ) : (
+                <Select onValueChange={handlePeriodSelect} value={selectedApprovalId || ''} disabled={isLoadingRecords || isSaving}>
+                  <SelectTrigger className="w-full max-w-md mx-auto bg-white/10 text-white placeholder-gray-400 border-white/20">
+                    <SelectValue placeholder="Choose a pay period..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Pay Periods (Pending/Approved Final Wages)</SelectLabel>
+                      {payPeriods.map(period => (
+                        <SelectItem key={period.approvalId} value={period.approvalId}>
+                          {format(parseISO(period.dateFrom), 'MMM dd, yyyy')} - {format(parseISO(period.dateTo), 'MMM dd, yyyy')} ({period.status})
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              )}
+            </CardHeader>
+            <CardContent>
+              {isLoadingRecords && (
+                  <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-white"/> <span className="ml-3 text-lg text-white">Loading records...</span></div>
+              )}
 
-            {!isLoadingRecords && selectedApprovalId && recordsToEdit.length === 0 && (
-                <p className="text-center text-gray-400 mt-6">No wage records found for the selected period or period not found.</p>
-            )}
+              {!isLoadingRecords && selectedApprovalId && recordsToEdit.length === 0 && (
+                  <p className="text-center text-gray-400 mt-6">No wage records found for the selected period or period not found.</p>
+              )}
 
-            {!isLoadingRecords && recordsToEdit.length > 0 && (
-              <div className="mt-6">
-                <h3 className="text-lg font-medium text-white mb-4 text-center">
-                    Editing Wages for Period: {
-                        payPeriods.find(p=>p.approvalId === selectedApprovalId) ? 
-                        `${format(parseISO(payPeriods.find(p=>p.approvalId === selectedApprovalId)!.dateFrom), 'MMM dd, yyyy')} - ${format(parseISO(payPeriods.find(p=>p.approvalId === selectedApprovalId)!.dateTo), 'MMM dd, yyyy')}`
-                        : 'Selected Period'
-                    }
-                </h3>
-                <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
-                  <Table>
-                    <TableHeader className="bg-white/10">
-                      <TableRow>
-                        <TableHead className="text-white border-r border-white/20">Employee</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">Total Hrs</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">Normal Hrs</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
-                        <TableHead className="text-white border-r border-white/20 text-right">Gross Pay</TableHead>
-                        <TableHead className="text-white text-right">Net Pay</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {recordsToEdit.map(record => {
-                        const employee = employees.find(emp => emp.id === record.employeeId);
-                        const currentInputs = editableWageData[record.id!];
-                        if (!employee || !currentInputs) return null;
-
-                        return (
-                          <TableRow key={record.id} className="hover:bg-white/10">
-                            <TableCell className="text-white border-r border-white/20">{employee.name}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${parseFloat(employee.hourlyWage).toFixed(2)}</TableCell>
-                            <TableCell className="border-r border-white/20">
-                              <Input type="text" value={currentInputs.totalHours} onChange={e => handleInputChange(record.id!, 'totalHours', e.target.value)} className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" disabled={isSaving} />
-                            </TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">{currentInputs.hoursWorked || '0.00'}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">{currentInputs.overtimeHours || '0.00'}</TableCell>
-                            <TableCell className="border-r border-white/20">
-                              <Input type="text" value={currentInputs.mealAllowance} onChange={e => handleInputChange(record.id!, 'mealAllowance', e.target.value)} className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" disabled={isSaving} />
-                            </TableCell>
-                            <TableCell className="border-r border-white/20">
-                              <Input type="text" value={currentInputs.otherDeductions} onChange={e => handleInputChange(record.id!, 'otherDeductions', e.target.value)} className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" disabled={isSaving} />
-                            </TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${(currentInputs.fnpfDeduction || 0).toFixed(2)}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${(currentInputs.grossPay || 0).toFixed(2)}</TableCell>
-                            <TableCell className="text-white font-medium text-right">${(currentInputs.netPay || 0).toFixed(2)}</TableCell>
-                          </TableRow>
-                        );
-                      })}
-                        <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
-                            <TableCell colSpan={2} className="text-right text-white pr-4 border-r border-white/20">Totals:</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right"></TableCell> {/* Spacer for total hours */}
-                            <TableCell className="text-white border-r border-white/20 text-right">{totalHoursWorked.toFixed(2)}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">{totalOvertimeHours.toFixed(2)}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${totalMealAllowance.toFixed(2)}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${totalOtherDeductions.toFixed(2)}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${totalFnpfDeduction.toFixed(2)}</TableCell>
-                            <TableCell className="text-white border-r border-white/20 text-right">${totalGrossPay.toFixed(2)}</TableCell>
-                            <TableCell className="text-white text-right">${totalNetPay.toFixed(2)}</TableCell>
+              {!isLoadingRecords && recordsToEdit.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium text-white mb-4 text-center">
+                      Editing Wages for Period: {
+                          payPeriods.find(p=>p.approvalId === selectedApprovalId) ? 
+                          `${format(parseISO(payPeriods.find(p=>p.approvalId === selectedApprovalId)!.dateFrom), 'MMM dd, yyyy')} - ${format(parseISO(payPeriods.find(p=>p.approvalId === selectedApprovalId)!.dateTo), 'MMM dd, yyyy')}`
+                          : 'Selected Period'
+                      }
+                  </h3>
+                  <div className="overflow-x-auto mb-6 border border-white/20 rounded-lg">
+                    <Table>
+                      <TableHeader className="bg-white/10">
+                        <TableRow>
+                          <TableHead className="text-white border-r border-white/20">Employee</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">Wage</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">Total Hrs</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">Normal Hrs</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">O/T Hrs</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">Meal</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">Deduct</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">FNPF</TableHead>
+                          <TableHead className="text-white border-r border-white/20 text-right">Gross Pay</TableHead>
+                          <TableHead className="text-white text-right">Net Pay</TableHead>
                         </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-                <div className="flex justify-center mt-6">
-                  <Button onClick={handleSaveChanges} disabled={isSaving || Object.keys(editableWageData).length === 0} variant="gradient" size="lg">
-                    {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Saving...</> : <><Save className="mr-2 h-4 w-4"/> Save Changes & Reset Approval</>}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </main>
+                      </TableHeader>
+                      <TableBody>
+                        {recordsToEdit.map(record => {
+                          const employee = employees.find(emp => emp.id === record.employeeId);
+                          const currentInputs = editableWageData[record.id!];
+                          if (!employee || !currentInputs) return null;
 
-      <AlertDialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
-        <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Save Changes</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-300">
-              Please enter the admin password to save these changes. This will also reset the approval status to 'pending'.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="grid gap-2">
-            <Label htmlFor="admin-password-edit">Admin Password</Label>
-            <Input
-              id="admin-password-edit"
-              type="password"
-              value={adminPasswordInput}
-              onChange={(e) => setAdminPasswordInput(e.target.value)}
-              className="bg-gray-800 border-white/20 text-white"
-              onKeyPress={(e) => { if (e.key === 'Enter') confirmSaveChanges(); }}
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {setShowPasswordDialog(false); setAdminPasswordInput('');}} className="border-white/20 text-white hover:bg-white/10">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmSaveChanges} disabled={isSaving} className="bg-blue-600 hover:bg-blue-700">
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Confirm Save'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                          return (
+                            <TableRow key={record.id} className="hover:bg-white/10">
+                              <TableCell className="text-white border-r border-white/20">{employee.name}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${parseFloat(employee.hourlyWage).toFixed(2)}</TableCell>
+                              <TableCell className="border-r border-white/20">
+                                <Input type="text" value={currentInputs.totalHours} onChange={e => handleInputChange(record.id!, 'totalHours', e.target.value)} className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" disabled={isSaving} />
+                              </TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">{currentInputs.hoursWorked || '0.00'}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">{currentInputs.overtimeHours || '0.00'}</TableCell>
+                              <TableCell className="border-r border-white/20">
+                                <Input type="text" value={currentInputs.mealAllowance} onChange={e => handleInputChange(record.id!, 'mealAllowance', e.target.value)} className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" disabled={isSaving} />
+                              </TableCell>
+                              <TableCell className="border-r border-white/20">
+                                <Input type="text" value={currentInputs.otherDeductions} onChange={e => handleInputChange(record.id!, 'otherDeductions', e.target.value)} className="w-20 p-1 text-sm border rounded text-gray-900 bg-white/90 text-right" disabled={isSaving} />
+                              </TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${(currentInputs.fnpfDeduction || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${(currentInputs.grossPay || 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-white font-medium text-right">${(currentInputs.netPay || 0).toFixed(2)}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                          <TableRow className="font-bold bg-white/15 border-t-2 border-white/30">
+                              <TableCell colSpan={2} className="text-right text-white pr-4 border-r border-white/20">Totals:</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right"></TableCell> {/* Spacer for total hours */}
+                              <TableCell className="text-white border-r border-white/20 text-right">{totalHoursWorked.toFixed(2)}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">{totalOvertimeHours.toFixed(2)}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${totalMealAllowance.toFixed(2)}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${totalOtherDeductions.toFixed(2)}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${totalFnpfDeduction.toFixed(2)}</TableCell>
+                              <TableCell className="text-white border-r border-white/20 text-right">${totalGrossPay.toFixed(2)}</TableCell>
+                              <TableCell className="text-white text-right">${totalNetPay.toFixed(2)}</TableCell>
+                          </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="flex justify-center mt-6">
+                    <Button onClick={handleSaveChanges} disabled={isSaving || Object.keys(editableWageData).length === 0} variant="gradient" size="lg">
+                      {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Saving...</> : <><Save className="mr-2 h-4 w-4"/> Save Changes & Reset Approval</>}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </main>
+
+        <AlertDialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+          <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm Save Changes</AlertDialogTitle>
+              <AlertDialogDescription className="text-gray-300">
+                Please enter the admin password to save these changes. This will also reset the approval status to 'pending'.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="grid gap-2">
+              <Label htmlFor="admin-password-edit">Admin Password</Label>
+              <Input
+                id="admin-password-edit"
+                type="password"
+                value={adminPasswordInput}
+                onChange={(e) => setAdminPasswordInput(e.target.value)}
+                className="bg-gray-800 border-white/20 text-white"
+                onKeyPress={(e) => { if (e.key === 'Enter') confirmSaveChanges(); }}
+              />
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {setShowPasswordDialog(false); setAdminPasswordInput('');}} className="border-white/20 text-white hover:bg-white/10">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmSaveChanges} disabled={isSaving} className="bg-blue-600 hover:bg-blue-700">
+                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Confirm Save'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   );
 };
 
 export default EditWagesPage;
-
-      
-    

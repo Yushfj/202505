@@ -1,6 +1,7 @@
+
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,23 +9,22 @@ import { Label } from '@/components/ui/label';
 import Image from 'next/image';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import { addEmployee, checkExistingFNPFNo } from '@/services/employee-service'; // Import service functions including the checker
+import { addEmployee, checkExistingFNPFNo } from '@/services/employee-service';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { ArrowLeft, Home, Loader2 } from "lucide-react"; // Added Loader2 icon
+import { ArrowLeft, Home, Loader2 } from "lucide-react";
 import Link from "next/link";
 import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox"
+import { Checkbox } from "@/components/ui/checkbox";
+import { toTitleCase } from '@/lib/utils'; // Import the new utility
 
-// Employee data type (excluding ID for creation)
-// Matches the type used in the service
 type EmployeeData = {
   name: string;
   position: string;
   hourlyWage: string;
-  fnpfNo: string | null; // Allow null
-  tinNo: string | null; // Allow null
-  bankCode: string | null; // Allow null
-  bankAccountNumber: string | null; // Allow null
+  fnpfNo: string | null;
+  tinNo: string | null;
+  bankCode: string | null;
+  bankAccountNumber: string | null;
   paymentMethod: 'cash' | 'online';
   branch: 'labasa' | 'suva';
   fnpfEligible: boolean;
@@ -35,49 +35,61 @@ const CreateEmployeePage = () => {
     name: '',
     position: '',
     hourlyWage: '',
-    fnpfNo: '', // Initialize as empty string, will be set to null if not eligible
-    tinNo: '', // Initialize as empty string, will be set to null if needed
-    bankCode: '', // Default to empty, required only if paymentMethod is 'online'
-    bankAccountNumber: '', // Default to empty, required only if paymentMethod is 'online'
+    fnpfNo: '',
+    tinNo: '',
+    bankCode: '',
+    bankAccountNumber: '',
     paymentMethod: 'cash',
     branch: 'labasa',
-    fnpfEligible: true, // Default to true
+    fnpfEligible: true,
   });
-  const [isLoading, setIsLoading] = useState(false); // State for loading indicator
-  const { toast } = useToast(); // Initialize useToast
+  const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
   const router = useRouter();
+  const [authCheckLoading, setAuthCheckLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
 
-  // Generic handler for most input changes
+  useEffect(() => {
+    const storedUser = localStorage.getItem('username');
+    if (!storedUser) {
+        router.replace('/');
+    } else if (storedUser === 'Priyanka Sharma') {
+        router.replace('/dashboard'); // Priyanka should not access this page
+    } else {
+        setCurrentUser(storedUser);
+        setAuthCheckLoading(false);
+    }
+  }, [router]);
+
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
-    setFormData(prev => ({ ...prev, [id]: value }));
+    let formattedValue = value;
+    if (id === 'name' || id === 'position') {
+      formattedValue = toTitleCase(value);
+    }
+    setFormData(prev => ({ ...prev, [id]: formattedValue }));
   };
 
-  // Handler for Select components (Bank Code)
   const handleBankCodeChange = (value: string) => {
-    setFormData(prev => ({ ...prev, bankCode: value || null })); // Store null if empty
+    setFormData(prev => ({ ...prev, bankCode: value || null }));
   };
 
-  // Handler for RadioGroup changes (Branch, Payment Method)
   const handleRadioChange = (field: keyof EmployeeData, value: 'labasa' | 'suva' | 'cash' | 'online') => {
     setFormData(prev => ({ ...prev, [field]: value }));
-     // Reset bank details if switching to cash
      if (field === 'paymentMethod' && value === 'cash') {
         setFormData(prev => ({ ...prev, bankCode: '', bankAccountNumber: '' }));
     }
   };
 
-  // Handler for Checkbox change (FNPF Eligibility)
   const handleCheckboxChange = (checked: boolean | string) => {
-      const isEligible = Boolean(checked); // Ensure boolean value
+      const isEligible = Boolean(checked);
       setFormData(prev => ({ ...prev, fnpfEligible: isEligible }));
-      // Clear FNPF No if not eligible
       if (!isEligible) {
           setFormData(prev => ({ ...prev, fnpfNo: '' }));
       }
   };
 
-  // Form validation logic
   const validateForm = (): boolean => {
     const { name, position, hourlyWage, fnpfNo, bankCode, bankAccountNumber, paymentMethod, fnpfEligible } = formData;
     let isValid = true;
@@ -93,123 +105,90 @@ const CreateEmployeePage = () => {
             errors.push('Hourly Wage must be a valid non-negative number.');
         }
     }
-
-    // Check FNPF number validity ONLY IF eligible and the input is not empty
     if (fnpfEligible && !fnpfNo?.trim()) {
         errors.push('FNPF Number is required when employee is FNPF eligible.');
-    } else if (fnpfEligible && fnpfNo && fnpfNo.trim().length > 0 && !/^\d+$/.test(fnpfNo.trim())) {
-        // Optional: Add regex check if FNPF needs to be numeric
-        // errors.push('FNPF Number must contain only digits.');
     }
-
-
     if (paymentMethod === 'online') {
       if (!bankCode) errors.push('Bank Code is required for online transfer.');
-      if (!bankAccountNumber?.trim()) { // Check bankAccountNumber?.trim()
+      if (!bankAccountNumber?.trim()) {
         errors.push('Bank Account Number is required for online transfer.');
       }
     }
-
     if (errors.length > 0) {
-      toast({ // Use toast for validation errors
+      toast({
         title: 'Validation Error',
         description: errors.join(' '),
         variant: 'destructive',
       });
-      console.error('Validation Error:', errors.join(' ')); // Log error to console as well
       isValid = false;
     }
-
     return isValid;
   };
 
-  // Form submission handler
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    console.log("Form submitted. Validating...");
-    if (!validateForm()) {
-        console.log("Validation failed.");
-        return;
-    }
-    if (isLoading) {
-        console.log("Submission blocked: Already processing.");
-        return; // Prevent multiple submissions
-    }
+    if (!validateForm() || isLoading) return;
+    setIsLoading(true);
 
-    console.log("Validation passed. Starting submission process...");
-    setIsLoading(true); // Start loading indicator
-
-    // Prepare data for saving (ensure correct types and nulls)
     const employeeDataToSave: EmployeeData = {
         ...formData,
-        fnpfNo: formData.fnpfEligible ? (formData.fnpfNo?.trim() || null) : null, // Ensure null if empty or ineligible
-        tinNo: formData.tinNo?.trim() ? formData.tinNo : null, // Set to null if empty
+        name: toTitleCase(formData.name.trim()), // Ensure final trim and format
+        position: toTitleCase(formData.position.trim()), // Ensure final trim and format
+        fnpfNo: formData.fnpfEligible ? (formData.fnpfNo?.trim() || null) : null,
+        tinNo: formData.tinNo?.trim() ? formData.tinNo : null,
         bankCode: formData.paymentMethod === 'online' ? (formData.bankCode || null) : null,
-        bankAccountNumber: formData.paymentMethod === 'online' ? (formData.bankAccountNumber?.trim() || null) : null, // Trim and ensure null
+        bankAccountNumber: formData.paymentMethod === 'online' ? (formData.bankAccountNumber?.trim() || null) : null,
     };
 
-    console.log('Data prepared for saving:', employeeDataToSave);
-
     try {
-        // --- Check for existing FNPF Number before attempting to add ---
         if (employeeDataToSave.fnpfEligible && employeeDataToSave.fnpfNo) {
-            console.log(`Checking if FNPF No ${employeeDataToSave.fnpfNo} already exists...`);
             const existingEmployee = await checkExistingFNPFNo(employeeDataToSave.fnpfNo);
             if (existingEmployee) {
-                toast({ // Use toast for duplicate FNPF error
+                toast({
                     title: 'Duplicate FNPF Number',
-                    description: `An employee with FNPF Number ${employeeDataToSave.fnpfNo} already exists. Please use a different number.`,
+                    description: `An employee with FNPF Number ${employeeDataToSave.fnpfNo} already exists (${existingEmployee.name}). Please use a different number.`,
                     variant: 'destructive',
                 });
                 console.error(`Duplicate FNPF Number detected: ${employeeDataToSave.fnpfNo}`);
-                setIsLoading(false); // Stop loading
-                return; // Stop the submission
+                setIsLoading(false);
+                return;
             }
-             console.log(`FNPF No ${employeeDataToSave.fnpfNo} is unique. Proceeding...`);
         }
-        // --- End FNPF Check ---
-
-      console.log('Attempting to call addEmployee service...');
-      await addEmployee(employeeDataToSave); // Call the service function
-      console.log('addEmployee service call successful.');
-
-      toast({ // Use toast for success message
+      await addEmployee(employeeDataToSave);
+      toast({
         title: 'Success',
         description: 'Employee created successfully!',
       });
-      console.log('Employee created successfully!'); // Log success to console
-
-      console.log('Redirecting to /employees/information');
-      // Redirect to the employee information page after success
       router.push('/employees/information');
-
     } catch (error: any) {
-      console.error('Error during employee creation process:', error); // Log the full error object
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-
-      toast({ // Use toast for general creation errors
+      toast({
         title: 'Error Creating Employee',
         description: error.message || 'Failed to save employee data. Check console for details.',
         variant: 'destructive',
       });
     } finally {
-      console.log("Finishing submission process.");
-      setIsLoading(false); // Stop loading indicator regardless of outcome
+      setIsLoading(false);
     }
   };
 
+  if (authCheckLoading) {
+    return (
+        <div className="flex justify-center items-center min-h-screen bg-black/70">
+            <Loader2 className="h-12 w-12 animate-spin text-white" />
+        </div>
+    );
+  }
+
   return (
-    // Use a div wrapper for layout control
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-start min-h-screen text-white font-sans">
-        {/* Header - Make sticky */}
          <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 bg-black/60 backdrop-blur-md">
              <Link href="/employees" className="ml-4" aria-label="Back to Employees">
                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
                      <ArrowLeft className="h-5 w-5" />
                  </Button>
              </Link>
-             <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
+             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 flex-grow">
                  New Employee
              </h1>
              <Link href="/dashboard" className="mr-4" aria-label="Dashboard">
@@ -219,13 +198,10 @@ const CreateEmployeePage = () => {
              </Link>
          </header>
 
-          {/* Main Content - Centered form */}
-         <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6"> {/* Added pt-6 */}
+         <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6">
              <Card className="w-full max-w-md bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40 z-10">
-                <CardContent className="p-6"> {/* Adjusted padding */}
+                <CardContent className="p-6">
                     <form onSubmit={handleSubmit}>
-
-                        {/* Branch Selection */}
                         <div className="grid gap-2">
                           <Label className="text-white font-semibold">Select Branch</Label>
                           <RadioGroup
@@ -243,8 +219,6 @@ const CreateEmployeePage = () => {
                               </div>
                           </RadioGroup>
                         </div>
-
-                        {/* Employee Name */}
                         <div className="grid gap-2 mt-4">
                           <Label htmlFor="name" className="text-white">
                               Employee Name <span className="text-red-500">*</span>
@@ -259,8 +233,6 @@ const CreateEmployeePage = () => {
                               className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                           />
                         </div>
-
-                        {/* Employee Position */}
                         <div className="grid gap-2">
                           <Label htmlFor="position" className="text-white">
                               Employee Position <span className="text-red-500">*</span>
@@ -275,8 +247,6 @@ const CreateEmployeePage = () => {
                               className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                           />
                         </div>
-
-                        {/* Hourly Wage */}
                         <div className="grid gap-2">
                           <Label htmlFor="hourlyWage" className="text-white">
                               Hourly Wage ($) <span className="text-red-500">*</span>
@@ -293,8 +263,6 @@ const CreateEmployeePage = () => {
                               className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                           />
                         </div>
-
-                        {/* TIN No */}
                          <div className="grid gap-2">
                             <Label htmlFor="tinNo" className="text-white">
                                 TIN No
@@ -303,13 +271,11 @@ const CreateEmployeePage = () => {
                                 id="tinNo"
                                 type="text"
                                 placeholder="Enter Tax ID Number (Optional)"
-                                value={formData.tinNo || ''} // Handle null/undefined for display
+                                value={formData.tinNo || ''}
                                 onChange={handleChange}
                                 className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                             />
                           </div>
-
-                         {/* FNPF Eligibility */}
                         <div className="flex items-center space-x-2 mt-4">
                             <Checkbox
                                 id="fnpfEligible"
@@ -319,10 +285,8 @@ const CreateEmployeePage = () => {
                             />
                             <Label htmlFor="fnpfEligible" className="text-white cursor-pointer">Eligible for FNPF Deduction</Label>
                         </div>
-
-                        {/* FNPF No (Conditional) */}
                         {formData.fnpfEligible && (
-                            <div className="grid gap-2 mt-2"> {/* Adjusted margin */}
+                            <div className="grid gap-2 mt-2">
                                 <Label htmlFor="fnpfNo" className="text-white">
                                     FNPF No <span className="text-red-500">*</span>
                                 </Label>
@@ -330,15 +294,13 @@ const CreateEmployeePage = () => {
                                     id="fnpfNo"
                                     type="text"
                                     placeholder="Enter FNPF Number"
-                                    value={formData.fnpfNo || ''} // Handle null/undefined for display
+                                    value={formData.fnpfNo || ''}
                                     onChange={handleChange}
                                     required={formData.fnpfEligible}
                                     className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                                 />
                             </div>
                         )}
-
-                        {/* Payment Method */}
                         <div className="grid gap-2 mt-4">
                           <Label className="text-white font-semibold">Payment Method</Label>
                           <RadioGroup
@@ -356,16 +318,13 @@ const CreateEmployeePage = () => {
                               </div>
                           </RadioGroup>
                         </div>
-
-                        {/* Bank Details (Conditional) */}
                         {formData.paymentMethod === 'online' && (
                         <>
-                            {/* Bank Code */}
                             <div className="grid gap-2 mt-4">
                                 <Label htmlFor="bankCode" className="text-white">Bank Code <span className="text-red-500">*</span></Label>
                                 <Select
                                     onValueChange={handleBankCodeChange}
-                                    value={formData.bankCode || ''} // Handle null for Select
+                                    value={formData.bankCode || ''}
                                     required={formData.paymentMethod === 'online'}
                                 >
                                     <SelectTrigger className="bg-white/10 text-white placeholder-gray-400 border-white/20">
@@ -380,8 +339,6 @@ const CreateEmployeePage = () => {
                                     </SelectContent>
                                 </Select>
                             </div>
-
-                            {/* Bank Account Number */}
                             <div className="grid gap-2">
                               <Label htmlFor="bankAccountNumber" className="text-white">
                                   Bank Account Number <span className="text-red-500">*</span>
@@ -390,7 +347,7 @@ const CreateEmployeePage = () => {
                                   id="bankAccountNumber"
                                   type="text"
                                   placeholder="Enter account number"
-                                  value={formData.bankAccountNumber || ''} // Handle null
+                                  value={formData.bankAccountNumber || ''}
                                   onChange={handleChange}
                                   required={formData.paymentMethod === 'online'}
                                   className="bg-white/10 text-white placeholder-gray-400 border-white/20"
@@ -398,13 +355,11 @@ const CreateEmployeePage = () => {
                             </div>
                         </>
                         )}
-
-                        {/* Submit Button */}
                         <Button
                           className="w-full mt-6"
                           type="submit"
                           variant="gradient"
-                          disabled={isLoading} // Disable button when loading
+                          disabled={isLoading}
                         >
                           {isLoading ? (
                             <>
@@ -416,11 +371,10 @@ const CreateEmployeePage = () => {
                           )}
                         </Button>
                     </form>
-                </CardContent>
+                 </CardContent>
              </Card>
          </main>
-
-        {/* Footer is handled by RootLayout */}
+     </div>
     </div>
   );
 };

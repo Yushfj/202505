@@ -2,39 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Default body styles - wallpaper will always be active */
 body {
-  font-family: 'Geist', sans-serif; /* Use Geist font */
-  /* Background styling is now handled by body::before */
-  min-height: 100vh; /* Ensure body takes full viewport height */
-  position: relative; /* Needed for the fixed pseudo-element */
+  font-family: 'Arial', sans-serif !important; /* Wallpaper uses Arial */
+  min-height: 100vh;
+  position: relative;
+  /* overflow: hidden !important; */ /* Removed to allow page scrolling */
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%) !important;
+  /* height: 100vh !important; */ /* Removed to allow content to determine height beyond viewport */
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
 }
 
-/* Apply fixed background image/gradient to the ::before pseudo-element */
+body * {
+  box-sizing: border-box !important;
+}
+
+/* Remove the general overlay if it was previously applied globally */
 body::before {
-  content: '';
-  position: fixed; /* Fixes the background */
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: -1; /* Place it behind the content */
-  background: url('/red-and-black-gaming-wallpapers-top-red-and-black-lightning-dark-gamer.jpg') no-repeat center center fixed;
-  background-size: cover;
-  /* Add a semi-transparent dark overlay */
-  background-color: rgba(0, 0, 0, 0.6); /* Darker overlay (0.6 = 60%) */
-  background-blend-mode: overlay; /* Blend the color with the image */
+  content: none !important;
 }
 
+/* Keyframes for global wallpaper - ensure names are unique if conflicts arise */
+@keyframes circuitMoveGlobalWP {
+    0% { transform: translate(0, 0); }
+    100% { transform: translate(50px, 50px); }
+}
+@keyframes logoFloatGlobalWP { /* This might be unused if logo is only on homepage */
+    0%, 100% { transform: translate(-50%, -50%) rotateY(0deg) rotateX(5deg); }
+    50% { transform: translate(-50%, -50%) rotateY(15deg) rotateX(-5deg); }
+}
+@keyframes logoGlowGlobalWP { /* This might be unused */
+    0% { filter: drop-shadow(0 5px 15px rgba(255, 0, 0, 0.3)); }
+    50% { filter: drop-shadow(0 5px 25px rgba(0, 102, 255, 0.5)); }
+    100% { filter: drop-shadow(0 5px 15px rgba(255, 0, 0, 0.3)); }
+}
+@keyframes sparkleGlobalWP {
+    0%, 100% { opacity: 0; transform: scale(0.5); }
+    50% { opacity: 1; transform: scale(1.5); }
+}
+@keyframes floatGlobalWP {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50% { transform: translateY(-30px) rotate(180deg); }
+}
+@keyframes lightningGlobalWP {
+    0%, 90%, 100% { opacity: 0; }
+    5%, 10% { opacity: 1; }
+}
+@keyframes textGlowGlobalWP { /* This might be unused */
+    0% { text-shadow: 0 0 20px rgba(0, 255, 136, 0.5); }
+    100% { text-shadow: 0 0 30px rgba(0, 255, 136, 0.8); }
+}
+@keyframes particleMoveGlobalWP {
+    0% { transform: translateY(100vh) translateX(var(--particle-tx-global-wp, 0px)); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(-100px) translateX(var(--particle-tx-global-wp, 100px)); opacity: 0; }
+}
+@keyframes energyPulseGlobalWP {
+    0% { transform: scale(0.5); opacity: 1; }
+    100% { transform: scale(2); opacity: 0; }
+}
 
-/* Ensure the main content area can scroll if it exceeds viewport height */
-/* main { */
-/*   overflow-y: auto; /* Allow vertical scrolling for the main content */
-/*   flex-grow: 1; /* Ensure it takes up available space */
-/* } */
 
 @layer base {
   :root {
-    --background: 0 0% 100%; /* White */
+    --background: 220 10% 95%; /* Light reddish-white */
     --foreground: 0 0% 3.9%; /* Dark Gray */
     --card: 0 0% 100%; /* White */
     --card-foreground: 0 0% 3.9%; /* Dark Gray */
@@ -56,8 +90,8 @@ body::before {
     --radius: 0.5rem;
 
     /* Custom Variables */
-    --background-start-rgb: 255, 255, 255;
-    --background-end-rgb: 255, 255, 255;
+    --background-start-rgb: 255, 230, 230; /* Light reddish */
+    --background-end-rgb: 255, 245, 245;   /* Lighter reddish white */
     --foreground-rgb: 0, 0, 0;
 
     /* Chart Colors */
@@ -127,5 +161,42 @@ body::before {
   * {
     @apply border-border;
   }
-  /* body already styled above */
+}
+
+@layer components {
+  .infographic-card {
+    @apply bg-slate-100 dark:bg-slate-800/90 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl p-6 m-3 transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-[1.02];
+  }
+
+  .infographic-card-icon-wrapper {
+    @apply mb-4 p-3 rounded-full inline-flex items-center justify-center shadow-md;
+    /* Example: bg-gradient-to-br from-blue-100 to-cyan-100 */
+  }
+
+  .infographic-card-title {
+    @apply text-lg font-bold mb-2;
+    /* Example: text-slate-800 dark:text-white */
+  }
+
+  .infographic-card-description {
+    @apply text-sm text-slate-600 dark:text-slate-300 mb-4 leading-relaxed;
+  }
+
+  .infographic-card-button {
+    @apply w-full px-4 py-2.5 text-white text-sm font-medium rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 transform hover:scale-105;
+    /* Example: bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 */
+  }
+
+  .infographic-central-hub {
+    @apply relative w-64 h-64 md:w-72 md:h-72 bg-gradient-to-br from-white/95 to-white/90 dark:from-slate-700/80 dark:to-slate-800/90 backdrop-blur-xl rounded-full shadow-2xl flex flex-col items-center justify-center border-4 border-white/50 dark:border-slate-600/50 p-6;
+  }
+
+  .infographic-central-hub-icon-wrapper {
+    @apply w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center mb-3 md:mb-4 shadow-lg;
+    /* Example: bg-gradient-to-br from-purple-500 to-indigo-600 */
+  }
+
+  .infographic-central-hub-title {
+    @apply text-xl md:text-2xl font-bold text-slate-800 dark:text-white text-center leading-tight;
+  }
 }

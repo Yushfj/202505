@@ -1,9 +1,10 @@
+
 'use client';
 
 import Image from 'next/image';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {useEffect, useState, useCallback} from 'react';
-import {Trash2, Edit, Home, ArrowLeft, Loader2, UserX} from 'lucide-react'; // Replaced UserSlash with UserX
+import {Trash2, Edit, Home, ArrowLeft, Loader2, UserX, Download} from 'lucide-react'; // Added Download icon
 import {Button} from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -12,7 +13,7 @@ import {
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
-  AlertDialogFooter, // Ensure AlertDialogFooter is imported
+  AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
@@ -20,61 +21,71 @@ import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-// Import service functions including setEmployeeActiveStatus
 import { getEmployees, deleteEmployee, setEmployeeActiveStatus } from '@/services/employee-service';
-import { cn } from '@/lib/utils'; // Import cn utility
+import { cn } from '@/lib/utils';
+import * as XLSX from 'xlsx'; // Import xlsx library
 
-// Matches the structure defined in employee-service.ts
 interface Employee {
-  id: string; // Keep ID as it's from the database
+  id: string;
   name: string;
   position: string;
   hourlyWage: string;
-  fnpfNo: string | null; // Allow null
-  tinNo: string | null; // Allow null
-  bankCode: string | null; // Allow null
-  bankAccountNumber: string | null; // Allow null
+  fnpfNo: string | null;
+  tinNo: string | null;
+  bankCode: string | null;
+  bankAccountNumber: string | null;
   paymentMethod: 'cash' | 'online';
   branch: 'labasa' | 'suva';
   fnpfEligible: boolean;
-  isActive: boolean; // Added isActive
+  isActive: boolean;
 }
 
 const EmployeeInformationPage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [isLoading, setIsLoading] = useState(true); // Loading state
-  const [isProcessing, setIsProcessing] = useState(false); // Generic processing state (delete/inactive)
-  const {toast} = useToast(); // Initialize useToast
-  const [actionPassword, setActionPassword] = useState(''); // Password for delete/inactive
-  const [employeeToAction, setEmployeeToAction] = useState<string | null>(null); // ID of employee for action
-  const [actionType, setActionType] = useState<'delete' | 'inactive' | null>(null); // Type of action
-  const ADMIN_PASSWORD = 'admin01'; // Store this securely in a real application
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false); // State for export loading
+  const {toast} = useToast();
+  const [actionPassword, setActionPassword] = useState('');
+  const [employeeToAction, setEmployeeToAction] = useState<string | null>(null);
+  const [actionType, setActionType] = useState<'delete' | 'inactive' | null>(null);
+  const ADMIN_PASSWORD = 'admin01';
   const router = useRouter();
+  const [authCheckLoading, setAuthCheckLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
 
-  // Function to fetch and set employees using useCallback
+  useEffect(() => {
+    const storedUser = localStorage.getItem('username');
+    if (!storedUser) {
+        router.replace('/');
+    } else if (storedUser === 'Priyanka Sharma') {
+        router.replace('/dashboard'); // Priyanka should not access this page
+    } else {
+        setCurrentUser(storedUser);
+        setAuthCheckLoading(false);
+    }
+  }, [router]);
+
   const fetchAndSetEmployees = useCallback(async () => {
-    setIsLoading(true); // Start loading
+    setIsLoading(true);
       try {
-        // Fetch only active employees by default
-        const fetchedEmployees = await getEmployees(false);
+        const fetchedEmployees = await getEmployees(false); // Fetch only active employees for display
         setEmployees(fetchedEmployees);
       } catch (error: any) {
-        console.error("Error fetching employees:", error);
-        toast({ // Use toast for error
+        toast({
           title: 'Error',
           description: error.message || 'Failed to load employee data.',
           variant: 'destructive',
         });
-        setEmployees([]); // Set to empty array on error
+        setEmployees([]);
       } finally {
-        setIsLoading(false); // Stop loading
+        setIsLoading(false);
       }
-    }, [toast]); // Add toast to dependencies
+    }, [toast]);
 
-  // Fetch employees on initial mount and when fetchAndSetEmployees changes (which it won't unless dependencies change)
   useEffect(() => {
-    fetchAndSetEmployees();
-  }, [fetchAndSetEmployees]); // Depend on the memoized function
+    if(!authCheckLoading) fetchAndSetEmployees();
+  }, [fetchAndSetEmployees, authCheckLoading]);
 
 
   const handleActionConfirm = async () => {
@@ -87,30 +98,21 @@ const EmployeeInformationPage = () => {
         description: 'Incorrect password. Please try again.',
         variant: 'destructive',
       });
-      console.error('Incorrect password. Please try again.');
-      // Optionally clear password: setActionPassword('');
       return;
     }
 
     setIsProcessing(true);
-
     try {
       if (actionType === 'delete') {
         await deleteEmployee(employeeToAction);
         toast({ title: 'Success', description: 'Employee deleted successfully!' });
-        console.log('Employee deleted successfully!');
       } else if (actionType === 'inactive') {
-        await setEmployeeActiveStatus(employeeToAction, false); // Set isActive to false
+        await setEmployeeActiveStatus(employeeToAction, false);
         toast({ title: 'Success', description: 'Employee marked as inactive successfully!' });
-        console.log('Employee marked as inactive successfully!');
       }
-
-      // Refetch employees to update the list
       await fetchAndSetEmployees();
-      closeDialog(); // Close the dialog after action
-
+      closeDialog();
     } catch (error: any) {
-      console.error(`Error performing action '${actionType}':`, error);
       toast({
         title: 'Error',
         description: error.message || `Failed to ${actionType} employee.`,
@@ -118,44 +120,96 @@ const EmployeeInformationPage = () => {
       });
     } finally {
        setIsProcessing(false);
-       // Dialog closing and state reset handled by closeDialog()
     }
   };
 
-  // Function to open the dialog and set state
   const openDialog = (employeeId: string, type: 'delete' | 'inactive') => {
       setEmployeeToAction(employeeId);
       setActionType(type);
-      setActionPassword(''); // Clear password on open
+      setActionPassword('');
   };
 
-  // Function to close the dialog and reset state
   const closeDialog = () => {
       setEmployeeToAction(null);
       setActionType(null);
       setActionPassword('');
   };
 
-  // Filter employees by branch (only active employees are fetched by default)
+  const handleExportAllEmployees = async () => {
+    setIsExporting(true);
+    try {
+      const allEmployeesData = await getEmployees(true); // Fetch all employees (active and inactive)
+      if (allEmployeesData.length === 0) {
+        toast({ title: "No Data", description: "No employee data to export.", variant: "default" });
+        setIsExporting(false);
+        return;
+      }
+
+      const dataToExport = allEmployeesData.map(emp => ({
+        "Employee ID": emp.id,
+        "Name": emp.name,
+        "Position": emp.position,
+        "Branch": emp.branch.charAt(0).toUpperCase() + emp.branch.slice(1),
+        "Hourly Wage ($)": parseFloat(emp.hourlyWage).toFixed(2),
+        "FNPF No": emp.fnpfNo || 'N/A',
+        "TIN No": emp.tinNo || 'N/A',
+        "Payment Method": emp.paymentMethod.charAt(0).toUpperCase() + emp.paymentMethod.slice(1),
+        "Bank Code": emp.bankCode || 'N/A',
+        "Bank Account Number": emp.bankAccountNumber || 'N/A',
+        "FNPF Eligible": emp.fnpfEligible ? 'Yes' : 'No',
+        "Status": emp.isActive ? 'Active' : 'Inactive',
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "All Employees");
+
+      // Set column widths (optional, for better formatting)
+      const colWidths = [
+        { wch: 30 }, // Employee ID
+        { wch: 30 }, // Name
+        { wch: 25 }, // Position
+        { wch: 10 }, // Branch
+        { wch: 15 }, // Hourly Wage
+        { wch: 15 }, // FNPF No
+        { wch: 15 }, // TIN No
+        { wch: 15 }, // Payment Method
+        { wch: 10 }, // Bank Code
+        { wch: 20 }, // Bank Account Number
+        { wch: 15 }, // FNPF Eligible
+        { wch: 10 }, // Status
+      ];
+      worksheet['!cols'] = colWidths;
+
+      XLSX.writeFile(workbook, "All_Employee_Details.xlsx");
+      toast({ title: "Export Successful", description: "All employee details exported to Excel." });
+
+    } catch (error: any) {
+      console.error("Error exporting employee data:", error);
+      toast({ title: "Export Error", description: `Failed to export employee data: ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+
   const labasaEmployees = employees.filter(employee => employee.branch === 'labasa');
   const suvaEmployees = employees.filter(employee => employee.branch === 'suva');
 
-  // Render loading state
-  if (isLoading) {
+  if (authCheckLoading || isLoading) {
       return (
            <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-center min-h-screen text-white font-sans">
                 <div className="text-xl flex items-center">
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Loading employee data...
+                  {authCheckLoading ? 'Authenticating...' : 'Loading employee data...'}
                 </div>
            </div>
       );
   }
 
-  // Render main content
   return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
        <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center min-h-screen text-white font-sans">
-
          <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-8 sm:mb-10 bg-black/60 backdrop-blur-md">
             <Link href="/employees" passHref className="ml-4">
                 <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
@@ -163,15 +217,27 @@ const EmployeeInformationPage = () => {
                     <span className="sr-only">Back to Employee Management</span>
                 </Button>
             </Link>
-            <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 flex-grow">
                 Employee Information
             </h1>
-            <Link href="/dashboard" passHref className="mr-4">
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-                    <Home className="h-5 w-5" />
-                    <span className="sr-only">Dashboard</span>
+            <div className="flex items-center mr-4">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleExportAllEmployees}
+                    disabled={isExporting}
+                    className="text-white hover:bg-white/10 mr-2"
+                    aria-label="Download All Employee Details"
+                >
+                    {isExporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
                 </Button>
-            </Link>
+                <Link href="/dashboard" passHref>
+                    <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+                        <Home className="h-5 w-5" />
+                        <span className="sr-only">Dashboard</span>
+                    </Button>
+                </Link>
+            </div>
         </header>
 
         <main className="w-full flex-grow overflow-y-auto pb-16 pt-6">
@@ -195,7 +261,6 @@ const EmployeeInformationPage = () => {
                                 {labasaEmployees.map((employee) => (
                                     <Card key={employee.id} className="bg-secondary/30 backdrop-blur-sm border border-white/10 rounded-lg text-white shadow-md relative overflow-hidden">
                                          <CardHeader className="pt-4 pb-2 px-4 flex flex-row justify-end items-center space-x-1 absolute top-1 right-1 z-10">
-                                              {/* Edit Button */}
                                               <Link href={`/employees/change?id=${employee.id}`} passHref className="mr-1">
                                                  <Button
                                                      variant="ghost"
@@ -206,7 +271,6 @@ const EmployeeInformationPage = () => {
                                                      <Edit className="h-4 w-4" />
                                                  </Button>
                                              </Link>
-                                              {/* Inactivate Button */}
                                               <Button
                                                   variant="ghost"
                                                   size="icon"
@@ -214,9 +278,8 @@ const EmployeeInformationPage = () => {
                                                   className="text-yellow-400 hover:text-yellow-200 hover:bg-white/20 h-7 w-7"
                                                   aria-label={`Mark ${employee.name} as inactive`}
                                               >
-                                                  <UserX className="h-4 w-4" /> {/* Replaced UserSlash with UserX */}
+                                                  <UserX className="h-4 w-4" />
                                               </Button>
-                                             {/* Delete Button */}
                                               <Button
                                                   variant="ghost"
                                                   size="icon"
@@ -259,7 +322,6 @@ const EmployeeInformationPage = () => {
                                 {suvaEmployees.map((employee) => (
                                      <Card key={employee.id} className="bg-secondary/30 backdrop-blur-sm border border-white/10 rounded-lg text-white shadow-md relative overflow-hidden">
                                          <CardHeader className="pt-4 pb-2 px-4 flex flex-row justify-end items-center space-x-1 absolute top-1 right-1 z-10">
-                                               {/* Edit Button */}
                                               <Link href={`/employees/change?id=${employee.id}`} passHref className="mr-1">
                                                  <Button
                                                      variant="ghost"
@@ -270,7 +332,6 @@ const EmployeeInformationPage = () => {
                                                      <Edit className="h-4 w-4" />
                                                  </Button>
                                              </Link>
-                                              {/* Inactivate Button */}
                                               <Button
                                                   variant="ghost"
                                                   size="icon"
@@ -278,9 +339,8 @@ const EmployeeInformationPage = () => {
                                                   className="text-yellow-400 hover:text-yellow-200 hover:bg-white/20 h-7 w-7"
                                                   aria-label={`Mark ${employee.name} as inactive`}
                                               >
-                                                  <UserX className="h-4 w-4" /> {/* Replaced UserSlash with UserX */}
+                                                  <UserX className="h-4 w-4" />
                                               </Button>
-                                             {/* Delete Button */}
                                               <Button
                                                   variant="ghost"
                                                   size="icon"
@@ -319,7 +379,6 @@ const EmployeeInformationPage = () => {
             )}
          </main>
 
-          {/* Generic Action Confirmation Dialog */}
           <AlertDialog open={!!actionType} onOpenChange={(open) => !open && closeDialog()}>
             <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
               <AlertDialogHeader>
@@ -358,6 +417,7 @@ const EmployeeInformationPage = () => {
             </AlertDialogContent>
           </AlertDialog>
     </div>
+   </div>
   );
 };
 

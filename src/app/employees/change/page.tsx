@@ -1,3 +1,4 @@
+
 'use client';
 
 import {useState, useEffect, useCallback} from 'react';
@@ -13,7 +14,7 @@ import {RadioGroup, RadioGroupItem} from '@/components/ui/radio-group';
 import { Checkbox } from "@/components/ui/checkbox"
 import Link from "next/link";
 import {ArrowLeft, Home, Loader2} from "lucide-react";
-import { getEmployees, getEmployeeById, updateEmployee } from '@/services/employee-service'; // Import service functions
+import { getEmployees, getEmployeeById, updateEmployee } from '@/services/employee-service';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,17 +26,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { toTitleCase } from '@/lib/utils'; // Import the new utility
 
-// Employee interface matching the service
 interface Employee {
-  id: string; // Keep ID for updates
+  id: string;
   name: string;
   position: string;
   hourlyWage: string;
-  fnpfNo: string | null; // Allow null
-  tinNo: string | null; // Allow null
-  bankCode: string | null; // Allow null
-  bankAccountNumber: string | null; // Allow null
+  fnpfNo: string | null;
+  tinNo: string | null;
+  bankCode: string | null;
+  bankAccountNumber: string | null;
   paymentMethod: 'cash' | 'online';
   branch: 'labasa' | 'suva';
   fnpfEligible: boolean;
@@ -45,48 +46,62 @@ const ChangeEmployeeInfoPage = () => {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
-  const [isLoadingEmployees, setIsLoadingEmployees] = useState(true); // State for loading all employees
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false); // State for loading selected employee details
-  const [isUpdating, setIsUpdating] = useState(false); // State for update process
-  const [showPasswordDialog, setShowPasswordDialog] = useState(false); // State for password dialog
-  const [updatePassword, setUpdatePassword] = useState(''); // State for password input
-  const {toast} = useToast(); // Initialize useToast
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(true);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [updatePassword, setUpdatePassword] = useState('');
+  const {toast} = useToast();
   const router = useRouter();
-  const ADMIN_PASSWORD = 'admin01'; // Store securely in a real application
+  const ADMIN_PASSWORD = 'admin01';
+  const [authCheckLoading, setAuthCheckLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
 
-  // Fetch all employees when the component mounts
+  useEffect(() => {
+    const storedUser = localStorage.getItem('username');
+    if (!storedUser) {
+        router.replace('/');
+    } else if (storedUser === 'Priyanka Sharma') {
+        router.replace('/dashboard'); // Priyanka should not access this page
+    } else {
+        setCurrentUser(storedUser);
+        setAuthCheckLoading(false);
+    }
+  }, [router]);
+
+
   const fetchAllEmployees = useCallback(async () => {
     setIsLoadingEmployees(true);
     try {
         const fetchedEmployees = await getEmployees();
         setAllEmployees(fetchedEmployees);
     } catch (error: any) {
-        toast({ // Use toast for error
+        toast({
             title: 'Error Fetching Employees',
             description: error.message || 'Failed to load employee list.',
             variant: 'destructive',
         });
-        console.error('Error Fetching Employees:', error.message || 'Failed to load employee list.'); // Log error
         setAllEmployees([]);
     } finally {
         setIsLoadingEmployees(false);
     }
-  }, [toast]); // Add toast to dependencies
+  }, [toast]);
 
   useEffect(() => {
-      fetchAllEmployees();
-  }, [fetchAllEmployees]);
+      if(!authCheckLoading) fetchAllEmployees();
+  }, [fetchAllEmployees, authCheckLoading]);
 
-  // Fetch the specific employee's data when an employee is selected
   const fetchEmployeeDetails = useCallback(async (employeeId: string) => {
     if (!employeeId) return;
     setIsLoadingDetails(true);
-    setEmployee(null); // Clear previous employee data
+    setEmployee(null);
     try {
         const foundEmployee = await getEmployeeById(employeeId);
         if (foundEmployee) {
             setEmployee({
                 ...foundEmployee,
+                name: toTitleCase(foundEmployee.name), // Format on load
+                position: toTitleCase(foundEmployee.position), // Format on load
                 hourlyWage: String(foundEmployee.hourlyWage || '0'),
                 fnpfNo: foundEmployee.fnpfNo || '',
                 tinNo: foundEmployee.tinNo || '',
@@ -94,68 +109,62 @@ const ChangeEmployeeInfoPage = () => {
                 bankAccountNumber: foundEmployee.bankAccountNumber || '',
             });
         } else {
-            toast({ title: 'Error', description: 'Selected employee not found.', variant: 'destructive' }); // Use toast for error
-            console.error('Selected employee not found.'); // Log error
-            setSelectedEmployeeId(null); // Reset selection if not found
+            toast({ title: 'Error', description: 'Selected employee not found.', variant: 'destructive' });
+            setSelectedEmployeeId(null);
         }
     } catch (error: any) {
-        toast({ // Use toast for error
+        toast({
             title: 'Error Fetching Details',
             description: error.message || 'Failed to load employee details.',
             variant: 'destructive',
         });
-        console.error('Error Fetching Details:', error.message || 'Failed to load employee details.'); // Log error
-         setSelectedEmployeeId(null); // Reset selection on error
+         setSelectedEmployeeId(null);
     } finally {
         setIsLoadingDetails(false);
     }
-  }, [toast]); // Add toast to dependencies
+  }, [toast]);
 
-  // Handle employee selection change
   const handleEmployeeSelect = (employeeId: string) => {
     setSelectedEmployeeId(employeeId);
     fetchEmployeeDetails(employeeId);
   };
 
-  // Handlers for form input changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
-    setEmployee(prev => prev ? { ...prev, [id]: value } : null);
+    let formattedValue = value;
+    if (id === 'name' || id === 'position') {
+      formattedValue = toTitleCase(value);
+    }
+    setEmployee(prev => prev ? { ...prev, [id]: formattedValue } : null);
   };
 
   const handleSelectChange = (field: keyof Employee, value: string) => {
     setEmployee(prev => prev ? { ...prev, [field]: value as any } : null);
-     // Reset bank details if switching to cash
      if (field === 'paymentMethod' && value === 'cash') {
         setEmployee(prev => prev ? { ...prev, bankCode: null, bankAccountNumber: null } : null);
     }
   };
 
    const handleBankCodeSelectChange = (value: string) => {
-     setEmployee(prev => prev ? { ...prev, bankCode: value || null } : null); // Ensure null if value is empty
+     setEmployee(prev => prev ? { ...prev, bankCode: value || null } : null);
    };
-
 
   const handleCheckboxChange = (checked: boolean | string) => {
       const isEligible = Boolean(checked);
       setEmployee(prev => prev ? { ...prev, fnpfEligible: isEligible } : null);
-      // Clear FNPF No if not eligible
       if (!isEligible) {
           setEmployee(prev => prev ? { ...prev, fnpfNo: null } : null);
       }
   };
 
-  // Form validation logic
   const validateForm = (): boolean => {
-      if (!employee) return false; // Should not happen if loaded correctly
-
+      if (!employee) return false;
       const { name, position, hourlyWage, fnpfNo, bankCode, bankAccountNumber, paymentMethod, fnpfEligible } = employee;
       let isValid = true;
       const errors: string[] = [];
-
       if (!name.trim()) errors.push('Employee Name is required.');
       if (!position.trim()) errors.push('Employee Position is required.');
-      if (!String(hourlyWage).trim()) { // Ensure hourlyWage is treated as string for validation
+      if (!String(hourlyWage).trim()) {
           errors.push('Hourly Wage is required.');
       } else {
           const wageAsNumber = parseFloat(String(hourlyWage));
@@ -163,121 +172,89 @@ const ChangeEmployeeInfoPage = () => {
               errors.push('Hourly Wage must be a valid non-negative number.');
           }
       }
-
-      if (fnpfEligible && !fnpfNo?.trim()) { // Use optional chaining and check trim
+      if (fnpfEligible && !fnpfNo?.trim()) {
         errors.push('FNPF Number is required when employee is FNPF eligible.');
       }
-
       if (paymentMethod === 'online') {
         if (!bankCode) errors.push('Bank Code is required for online transfer.');
         if (!bankAccountNumber?.trim()) errors.push('Bank Account Number is required for online transfer.');
       }
-
       if (errors.length > 0) {
-        toast({ // Use toast for validation errors
+        toast({
           title: 'Validation Error',
           description: errors.join(' '),
           variant: 'destructive',
         });
-        console.error('Validation Error:', errors.join(' ')); // Log error
         isValid = false;
       }
-
       return isValid;
   };
 
-
-  // Form submission handler - now triggers the password dialog
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-
-    if (!employee || !validateForm() || isUpdating) {
-        return; // Don't submit if no employee, invalid, or already updating
-    }
-    // Open the password confirmation dialog instead of directly updating
+    if (!employee || !validateForm() || isUpdating) return;
     setShowPasswordDialog(true);
   };
 
-  // Function called when password confirmation is submitted
   const confirmUpdate = async () => {
     if (updatePassword !== ADMIN_PASSWORD) {
-        toast({ // Use toast for incorrect password
+        toast({
             title: 'Error',
             description: 'Incorrect admin password.',
             variant: 'destructive',
         });
-        console.error('Incorrect admin password.'); // Log error
-        // Optionally clear password field here or keep it for retry
-        // setUpdatePassword('');
-        return; // Stop the update process
+        return;
     }
-
-    // Close dialog first
     setShowPasswordDialog(false);
-    setUpdatePassword(''); // Clear password after check
+    setUpdatePassword('');
+    if (!employee) return;
+    setIsUpdating(true);
 
-    if (!employee) return; // Should not happen
-
-    setIsUpdating(true); // Indicate update process started
-
-    // Prepare updated data, ensuring conditional fields are correct (set to null if needed)
     const updatedEmployeeData: Employee = {
         ...employee,
-        hourlyWage: String(employee.hourlyWage), // Assuming service expects string, adjust if needed
-        fnpfNo: employee.fnpfEligible ? (employee.fnpfNo?.trim() || null) : null, // Trim and set null if empty/ineligible
-        tinNo: employee.tinNo?.trim() ? employee.tinNo : null, // Set to null if empty
+        name: toTitleCase(employee.name.trim()), // Ensure final trim and format
+        position: toTitleCase(employee.position.trim()), // Ensure final trim and format
+        hourlyWage: String(employee.hourlyWage),
+        fnpfNo: employee.fnpfEligible ? (employee.fnpfNo?.trim() || null) : null,
+        tinNo: employee.tinNo?.trim() ? employee.tinNo : null,
         bankCode: employee.paymentMethod === 'online' ? (employee.bankCode || null) : null,
-        bankAccountNumber: employee.paymentMethod === 'online' ? (employee.bankAccountNumber?.trim() || null) : null, // Trim and set null if empty/cash
+        bankAccountNumber: employee.paymentMethod === 'online' ? (employee.bankAccountNumber?.trim() || null) : null,
     };
 
     try {
-      // Call the service function to update the employee in the database
       await updateEmployee(updatedEmployeeData);
-
-      toast({ // Use toast for success message
+      toast({
         title: 'Success',
         description: 'Employee information updated successfully!',
       });
-      console.log('Employee information updated successfully!'); // Log success
-
-      // Optionally reset selection and form
       setSelectedEmployeeId(null);
       setEmployee(null);
-      // Consider navigating back or allowing further edits
-      // router.push('/employees/information'); // Optional: navigate back
-
+      fetchAllEmployees(); // Re-fetch employees to update dropdown
     } catch (error: any) {
-      toast({ // Use toast for update error
+      toast({
         title: 'Error Updating Employee',
         description: error.message || 'Failed to update employee information.',
         variant: 'destructive',
       });
-      console.error('Error Updating Employee:', error.message || 'Failed to update employee information.'); // Log error
     } finally {
-      setIsUpdating(false); // Indicate update process finished
+      setIsUpdating(false);
     }
   };
 
-
-  // Render loading state for employee list
-  if (isLoadingEmployees) {
+  if (authCheckLoading || isLoadingEmployees) {
     return (
-        // Use a div wrapper for layout control
          <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-center min-h-screen text-white font-sans">
              <div className="text-xl flex items-center">
                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                 Loading employees...
+                 {authCheckLoading ? 'Authenticating...' : 'Loading employees...'}
              </div>
-              {/* Footer is handled by RootLayout */}
          </div>
     );
   }
 
-  // Render the main page content
   return (
-     // Use a div wrapper for layout control
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow items-center justify-start min-h-screen text-white font-sans">
-         {/* Header - Make sticky */}
          <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 bg-black/60 backdrop-blur-md">
              <Link href="/employees" className="ml-4">
                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
@@ -285,7 +262,7 @@ const ChangeEmployeeInfoPage = () => {
                      <span className="sr-only">Back to Employee Management</span>
                  </Button>
              </Link>
-             <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-center text-gray-100 flex-grow">
+             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 flex-grow">
                  Change Employee Information
              </h1>
              <Link href="/dashboard" className="mr-4">
@@ -296,13 +273,10 @@ const ChangeEmployeeInfoPage = () => {
              </Link>
          </header>
 
-         {/* Main Content */}
-         <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6"> {/* Added pt-6 */}
+         <main className="flex flex-col items-center flex-grow w-full pb-16 pt-6">
              <Card className="w-full max-w-md bg-transparent backdrop-blur-md shadow-lg rounded-lg border border-accent/40">
-                 <CardContent className="p-6"> {/* Adjusted padding */}
-
-                     {/* Employee Selection Dropdown */}
-                      <div className="grid gap-2 mb-6"> {/* Added margin bottom */}
+                 <CardContent className="p-6">
+                      <div className="grid gap-2 mb-6">
                          <Label htmlFor="employee-select" className="text-white">Select Employee</Label>
                          <Select onValueChange={handleEmployeeSelect} value={selectedEmployeeId || ''}>
                              <SelectTrigger id="employee-select" className="bg-white/10 text-white placeholder-gray-400 border-white/20">
@@ -327,7 +301,6 @@ const ChangeEmployeeInfoPage = () => {
                          </Select>
                        </div>
 
-                     {/* Loading indicator for employee details */}
                      {isLoadingDetails && (
                          <div className="flex items-center justify-center py-4">
                              <Loader2 className="mr-2 h-5 w-5 animate-spin text-white" />
@@ -335,11 +308,9 @@ const ChangeEmployeeInfoPage = () => {
                          </div>
                      )}
 
-                     {/* Conditionally render form when employee is selected and loaded */}
                      {employee && !isLoadingDetails && (
                          <form onSubmit={handleSubmit}>
-                              {/* Branch Selection */}
-                              <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                              <div className="grid gap-2 mb-4">
                                  <Label className="text-white font-semibold">Select Branch</Label>
                                  <RadioGroup
                                      onValueChange={(value) => handleSelectChange('branch', value)}
@@ -356,9 +327,7 @@ const ChangeEmployeeInfoPage = () => {
                                      </div>
                                  </RadioGroup>
                              </div>
-
-                             {/* Employee Name */}
-                             <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                             <div className="grid gap-2 mb-4">
                                  <Label htmlFor="name" className="text-white">
                                      Employee Name <span className="text-red-500">*</span>
                                  </Label>
@@ -372,9 +341,7 @@ const ChangeEmployeeInfoPage = () => {
                                      className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                                  />
                              </div>
-
-                             {/* Employee Position */}
-                             <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                             <div className="grid gap-2 mb-4">
                                  <Label htmlFor="position" className="text-white">
                                      Employee Position <span className="text-red-500">*</span>
                                  </Label>
@@ -388,9 +355,7 @@ const ChangeEmployeeInfoPage = () => {
                                      className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                                  />
                              </div>
-
-                             {/* Hourly Wage */}
-                             <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                             <div className="grid gap-2 mb-4">
                                  <Label htmlFor="hourlyWage" className="text-white">
                                      Hourly Wage ($) <span className="text-red-500">*</span>
                                  </Label>
@@ -400,15 +365,13 @@ const ChangeEmployeeInfoPage = () => {
                                      step="0.01"
                                      min="0"
                                      placeholder="e.g., 15.50"
-                                     value={employee.hourlyWage || ""} // Provide default value
+                                     value={employee.hourlyWage || ""}
                                      onChange={handleChange}
                                      required
                                      className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                                  />
                              </div>
-
-                              {/* TIN No */}
-                              <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                              <div className="grid gap-2 mb-4">
                                 <Label htmlFor="tinNo" className="text-white">
                                     TIN No
                                 </Label>
@@ -416,26 +379,22 @@ const ChangeEmployeeInfoPage = () => {
                                     id="tinNo"
                                     type="text"
                                     placeholder="Enter Tax ID Number (Optional)"
-                                    value={employee.tinNo || ''} // Use empty string for null
+                                    value={employee.tinNo || ''}
                                     onChange={handleChange}
                                     className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                                 />
                               </div>
-
-                             {/* FNPF Eligibility */}
-                              <div className="flex items-center space-x-2 mb-2"> {/* Reduced margin bottom */}
+                              <div className="flex items-center space-x-2 mb-2">
                                   <Checkbox
                                       id="fnpfEligible"
                                       checked={employee.fnpfEligible}
                                       onCheckedChange={handleCheckboxChange}
-                                      className="border-white data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground" // Added explicit checked styles
+                                      className="border-white data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
                                   />
                                   <Label htmlFor="fnpfEligible" className="text-white cursor-pointer">Eligible for FNPF Deduction</Label>
                               </div>
-
-                             {/* FNPF No (Conditional) */}
                               {employee.fnpfEligible && (
-                                <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                <div className="grid gap-2 mb-4">
                                     <Label htmlFor="fnpfNo" className="text-white">
                                         FNPF No <span className="text-red-500">*</span>
                                     </Label>
@@ -443,16 +402,14 @@ const ChangeEmployeeInfoPage = () => {
                                         id="fnpfNo"
                                         type="text"
                                         placeholder="Enter FNPF Number"
-                                        value={employee.fnpfNo || ''} // Use empty string for null
+                                        value={employee.fnpfNo || ''}
                                         onChange={handleChange}
                                         required={employee.fnpfEligible}
                                         className="bg-white/10 text-white placeholder-gray-400 border-white/20"
                                     />
                                 </div>
                               )}
-
-                             {/* Payment Method */}
-                              <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                              <div className="grid gap-2 mb-4">
                                 <Label className="text-white font-semibold">Payment Method</Label>
                                 <RadioGroup
                                     onValueChange={(value) => handleSelectChange('paymentMethod', value)}
@@ -469,12 +426,9 @@ const ChangeEmployeeInfoPage = () => {
                                     </div>
                                 </RadioGroup>
                               </div>
-
-                             {/* Bank Details (Conditional) */}
                               {employee.paymentMethod === 'online' && (
                               <>
-                                 {/* Bank Code */}
-                                  <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                  <div className="grid gap-2 mb-4">
                                   <Label htmlFor="bankCode" className="text-white">Bank Code <span className="text-red-500">*</span></Label>
                                        <Select onValueChange={handleBankCodeSelectChange} value={employee.bankCode || ''} required={employee.paymentMethod === 'online'}>
                                           <SelectTrigger className="bg-white/10 text-white placeholder-gray-400 border-white/20">
@@ -489,8 +443,7 @@ const ChangeEmployeeInfoPage = () => {
                                           </SelectContent>
                                       </Select>
                                   </div>
-                                  {/* Bank Account Number */}
-                                  <div className="grid gap-2 mb-4"> {/* Added margin bottom */}
+                                  <div className="grid gap-2 mb-4">
                                     <Label htmlFor="bankAccountNumber" className="text-white">
                                         Bank Account Number <span className="text-red-500">*</span>
                                     </Label>
@@ -498,7 +451,7 @@ const ChangeEmployeeInfoPage = () => {
                                         id="bankAccountNumber"
                                         type="text"
                                         placeholder="Enter account number"
-                                        value={employee.bankAccountNumber || ''} // Use empty string for null
+                                        value={employee.bankAccountNumber || ''}
                                         onChange={handleChange}
                                         required={employee.paymentMethod === 'online'}
                                         className="bg-white/10 text-white placeholder-gray-400 border-white/20"
@@ -506,13 +459,11 @@ const ChangeEmployeeInfoPage = () => {
                                   </div>
                               </>
                               )}
-
-                           {/* Submit Button */}
                            <Button
                              className="w-full mt-6"
                              type="submit"
                              variant="gradient"
-                             disabled={isUpdating} // Disable button while updating
+                             disabled={isUpdating}
                            >
                              {isUpdating ? (
                                <>
@@ -525,7 +476,6 @@ const ChangeEmployeeInfoPage = () => {
                            </Button>
                          </form>
                      )}
-                     {/* Message when no employee is selected */}
                      {!selectedEmployeeId && !isLoadingEmployees && allEmployees.length > 0 && (
                          <p className="text-center text-gray-400 mt-4">Please select an employee from the dropdown above to edit their information.</p>
                      )}
@@ -535,9 +485,7 @@ const ChangeEmployeeInfoPage = () => {
                  </CardContent>
              </Card>
          </main>
-          {/* Footer is handled by RootLayout */}
 
-          {/* Password Confirmation Dialog */}
            <AlertDialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
                <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
                    <AlertDialogHeader>
@@ -570,6 +518,7 @@ const ChangeEmployeeInfoPage = () => {
                </AlertDialogContent>
            </AlertDialog>
     </div>
+   </div>
   );
 };
 

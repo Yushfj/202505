@@ -1,3 +1,4 @@
+
 'use client';
 
 import {useEffect, useState, useCallback} from 'react';
@@ -13,32 +14,31 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {Button} from '@/components/ui/button';
-import {Calendar} from '@/components/ui/calendar';
 import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
 import {cn} from '@/lib/utils';
-import {format, isValid as isDateValid, parseISO} from 'date-fns'; // Use alias
-import {CalendarIcon, Home, ArrowLeft, Trash2, FileText, FileDown, Loader2, CheckCircle, XCircle, AlertTriangle, Copy, FileType, Mail, RefreshCw, Download, Edit2 } from 'lucide-react'; // Added Edit2 icon
+import {format, isValid as isDateValid, parseISO} from 'date-fns';
+import {CalendarIcon, Home, ArrowLeft, Trash2, FileDown, Loader2, CheckCircle, XCircle, AlertTriangle, Copy, RefreshCw, Download, Edit2 } from 'lucide-react'; // Use RefreshCw or similar for Resend
 import {DateRange} from 'react-day-picker';
 import { useToast } from '@/hooks/use-toast';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
-  AlertDialogFooter, 
+  AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {useRouter} from 'next/navigation';
-import jsPDF from 'jspdf'; 
-import autoTable from 'jspdf-autotable'; 
-
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 // Import DB service functions for employees and wages
-import { getEmployees, getWageRecords, deleteWageRecordsByApprovalId, getPayPeriodSummaries, requestWageApproval, type PayPeriodSummary, type Employee, type WageRecord } from '@/services/employee-service'; 
+import { getEmployees, getWageRecords, deleteWageRecordsByApprovalId, getPayPeriodSummaries, requestWageApproval, type PayPeriodSummary, type Employee, type WageRecord } from '@/services/employee-service';
 
 // --- Component ---
 const WagesRecordsPage = () => {
@@ -48,25 +48,41 @@ const WagesRecordsPage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); 
-  const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null); 
-  const [selectedStatus, setSelectedStatus] = useState<'approved' | 'declined' | 'pending'>('approved'); 
-  const [deletePassword, setDeletePassword] = useState('');
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [actionType, setActionType] = useState<'delete' | null>(null); 
+  const [isProcessing, setIsProcessing] = useState(false); // General processing state
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<'approved' | 'declined' | 'pending'>('approved');
+  const [actionPassword, setActionPassword] = useState(''); // Re-used for different actions requiring password
+  const [showActionDialog, setShowActionDialog] = useState(false); // Generic dialog state
+  const [actionType, setActionType] = useState<'delete' | 'resend' | null>(null); // To control dialog content
   const {toast} = useToast();
   const router = useRouter();
-  const ADMIN_PASSWORD = 'admin01'; 
+  const ADMIN_PASSWORD = 'admin01';
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [authCheckLoading, setAuthCheckLoading] = useState(true);
+
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('username');
+    if (!storedUser) {
+        router.replace('/');
+    } else if (storedUser === 'Priyanka Sharma') {
+        router.replace('/dashboard');
+    } else {
+        setCurrentUser(storedUser);
+        setAuthCheckLoading(false);
+    }
+  }, [router]);
+
 
   // --- Data Fetching ---
   const fetchInitialData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [fetchedEmployees, approvedPeriods, declinedPeriods, pendingPeriods] = await Promise.all([
-          getEmployees(true), 
-          getPayPeriodSummaries('approved'),
-          getPayPeriodSummaries('declined'),
-          getPayPeriodSummaries('pending'),
+          getEmployees(true), // Fetch all employees (active and inactive) for historical records
+          getPayPeriodSummaries('approved', 'final_wage'),
+          getPayPeriodSummaries('declined', 'final_wage'),
+          getPayPeriodSummaries('pending', 'final_wage'),
       ]);
       setEmployees(fetchedEmployees);
       setPayPeriodSummaries({
@@ -87,16 +103,16 @@ const WagesRecordsPage = () => {
   }, [toast]);
 
   useEffect(() => {
-    fetchInitialData();
-  }, [fetchInitialData]);
+    if(!authCheckLoading) fetchInitialData();
+  }, [authCheckLoading, fetchInitialData]);
 
   // --- Fetch Details for Selected Period ---
   const fetchPeriodDetails = useCallback(async (approvalId: string) => {
       if (!approvalId) return;
-      setIsLoading(true); 
+      setIsLoading(true);
       try {
            const selectedPeriodSummary = [...payPeriodSummaries.approved, ...payPeriodSummaries.pending, ...payPeriodSummaries.declined].find(p => p.approvalId === approvalId);
-           const statusToFetch = selectedPeriodSummary?.status || null; 
+           const statusToFetch = selectedPeriodSummary?.status || null;
 
            if (!statusToFetch) {
                throw new Error("Could not determine the status of the selected period.");
@@ -141,18 +157,18 @@ const WagesRecordsPage = () => {
                   dateFrom: dateFromStr,
                   dateTo: dateToStr,
               };
-          }) as WageRecord[]; 
+          }) as WageRecord[];
 
 
           setSelectedPeriodRecords(parsedRecords);
       } catch (error: any) {
           console.error(`Error fetching details for approval ID ${approvalId}:`, error);
           toast({ title: "Error", description: `Failed to load details for the selected period. ${error.message}`, variant: "destructive" });
-          setSelectedPeriodRecords([]); 
+          setSelectedPeriodRecords([]);
       } finally {
           setIsLoading(false);
       }
-  }, [toast, payPeriodSummaries]); 
+  }, [toast, payPeriodSummaries]);
 
   // --- Event Handlers ---
   const handlePeriodSelect = (approvalId: string) => {
@@ -168,92 +184,124 @@ const WagesRecordsPage = () => {
   const handleTabChange = (status: string) => {
       const validStatus = status as 'approved' | 'declined' | 'pending';
       setSelectedStatus(validStatus);
-      setSelectedApprovalId(null); 
+      setSelectedApprovalId(null);
       setSelectedPeriodRecords([]);
   };
 
-  const initiateDelete = (approvalId: string) => {
-      setSelectedApprovalId(approvalId); 
-      setActionType('delete'); 
-      setShowDeleteDialog(true);
+  const initiateAction = (approvalId: string, type: 'delete' | 'resend') => {
+      setSelectedApprovalId(approvalId);
+      setActionType(type);
+      setShowActionDialog(true);
+      setActionPassword(''); // Clear password for new action
   };
 
   const closeDialog = () => {
-    setShowDeleteDialog(false);
-    setSelectedApprovalId(null);
-    setDeletePassword(''); 
-    setActionType(null); 
+    setShowActionDialog(false);
+    setActionPassword('');
+    // Do not reset selectedApprovalId or actionType here,
+    // as it might be needed if the dialog was for a specific item.
+    // Let them be reset as part of successful action or tab change.
   };
 
-  const handleDeleteRecords = async () => {
-    if (!selectedApprovalId) {
-      toast({ title: 'Error', description: 'No pay period selected for deletion.', variant: 'destructive' });
-      console.error('No pay period selected for deletion.');
-      setShowDeleteDialog(false);
+  const handleConfirmAction = async () => {
+    if (!selectedApprovalId || !actionType) return;
+
+    if (actionPassword !== ADMIN_PASSWORD) {
+      toast({ title: 'Error', description: 'Incorrect admin password.', variant: 'destructive' });
       return;
     }
 
-    if (deletePassword !== ADMIN_PASSWORD) {
-      toast({ title: 'Error', description: 'Incorrect password.', variant: 'destructive' });
-      console.error('Incorrect password.');
-      return;
+    setIsProcessing(true); // Use general processing state
+
+    if (actionType === 'delete') {
+        try {
+            const deletedPeriodSummary = [...payPeriodSummaries.approved, ...payPeriodSummaries.pending, ...payPeriodSummaries.declined].find(p => p.approvalId === selectedApprovalId);
+            await deleteWageRecordsByApprovalId(selectedApprovalId);
+            const deletedType = deletedPeriodSummary?.approval_type === 'timesheet_review' ? 'Timesheet review period' : 'Final wage period';
+            toast({ title: 'Success', description: `${deletedType} and any associated records deleted successfully!` });
+            await fetchInitialData(); // Refreshes all lists
+        } catch (error: any) {
+            console.error(`Error deleting records for approval ID ${selectedApprovalId}:`, error);
+            toast({ title: 'Error', description: error.message || `Failed to delete records.`, variant: 'destructive' });
+        }
+    } else if (actionType === 'resend') {
+        const periodToResend = payPeriodSummaries.pending.find(p => p.approvalId === selectedApprovalId);
+        if (periodToResend && periodToResend.token) {
+            try {
+                // Re-fetch the full wage records for this approvalId to pass to requestWageApproval
+                const recordsForResend = await getWageRecords(null, null, 'pending', periodToResend.approvalId);
+                if (recordsForResend.length === 0) throw new Error("No wage records found to resend for this period.");
+
+                // We might need to map `WageRecord` to the input type of `requestWageApproval`
+                const mappedRecords = recordsForResend.map(r => ({
+                    employeeId: r.employeeId,
+                    employeeName: r.employeeName,
+                    hourlyWage: r.hourlyWage,
+                    totalHours: r.totalHours,
+                    hoursWorked: r.hoursWorked,
+                    overtimeHours: r.overtimeHours,
+                    mealAllowance: r.mealAllowance,
+                    otherDeductions: r.otherDeductions,
+                    grossPay: r.grossPay,
+                    fnpfDeduction: r.fnpfDeduction,
+                    netPay: r.netPay,
+                    dateFrom: r.dateFrom,
+                    dateTo: r.dateTo,
+                }));
+
+                const initiatedBy = currentUser || "System (Resend)";
+                const { approvalLink } = await requestWageApproval(mappedRecords, initiatedBy, periodToResend.approvalId); // Pass existing approvalId to update
+                toast({ title: 'Approval Link Resent', description: 'New approval link generated and copied to clipboard.', duration: 7000});
+                 if (approvalLink) {
+                    navigator.clipboard.writeText(approvalLink).then(() => {
+                       toast({ title: 'Link Copied!', description: 'Approval link copied to clipboard.' });
+                    }).catch(err => {
+                       console.error('Failed to copy link automatically:', err);
+                       toast({ title: 'Manual Copy Recommended', description: `Approval link: ${approvalLink}`, variant: 'default', duration: 15000 });
+                    });
+                }
+                await fetchInitialData(); // Refresh to show updated token if any
+            } catch (error: any) {
+                console.error(`Error resending approval for ID ${selectedApprovalId}:`, error);
+                toast({ title: 'Error Resending', description: error.message || 'Failed to resend approval link.', variant: 'destructive' });
+            }
+        } else {
+            toast({ title: 'Error', description: 'Could not find period or token to resend approval.', variant: 'destructive' });
+        }
     }
 
-    setIsDeleting(true);
-    setIsProcessing(true); 
-
-    try {
-        await deleteWageRecordsByApprovalId(selectedApprovalId);
-
-        toast({ title: 'Success', description: 'Wage records deleted successfully!' });
-        console.log(`Wage records for approval ID ${selectedApprovalId} deleted successfully!`);
-
-        await fetchInitialData();
-        closeDialog(); 
-
-    } catch (error: any) {
-        console.error(`Error deleting records for approval ID ${selectedApprovalId}:`, error);
-        toast({
-            title: 'Error',
-            description: error.message || `Failed to delete wage records.`,
-            variant: 'destructive',
-        });
-    } finally {
-       setIsDeleting(false);
-       setIsProcessing(false); 
-       setShowDeleteDialog(false); 
-       setDeletePassword('');
-       setSelectedApprovalId(null); 
-    }
+    setIsProcessing(false);
+    closeDialog(); // Close dialog after action
+    setSelectedApprovalId(null); // Clear selection
+    setActionType(null);
   };
 
-   const generateApprovalLink = (token: string | undefined): string | null => {
+
+  const generateApprovalLink = (token: string | undefined): string | null => {
         if (!token) return null;
-        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'; 
-
+        // Ensure NEXT_PUBLIC_BASE_URL is defined in your .env.local or environment variables
+        const baseURL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
         if (!baseURL) {
              console.warn("Warning: NEXT_PUBLIC_BASE_URL is not set. Using fallback http://localhost:9002. Approval links may not work in deployed environments.");
          } else if (baseURL.includes('localhost') && process.env.NODE_ENV === 'production') {
              console.warn("Warning: NEXT_PUBLIC_BASE_URL is set to localhost in production. Ensure it's set to the deployed application's public URL in your hosting environment (e.g., Railway).");
          }
 
-        const path = '/approve-wages'; 
+        const path = '/approve-wages';
         const cleanBaseURL = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL;
         return `${cleanBaseURL}${path}?token=${token}`;
   };
 
-    const handleApprovalLinkAction = async (approvalId: string, token: string | undefined) => {
+    const handleCopyApprovalLink = async (token: string | undefined) => {
         if (!token) {
             toast({ title: 'Error', description: 'Approval token is missing for this period.', variant: 'destructive' });
             return;
         }
-
         const link = generateApprovalLink(token);
         if (!link) {
              toast({ title: 'Error', description: 'Could not generate approval link. Check configuration.', variant: 'destructive' });
              return;
         }
-
         try {
             await navigator.clipboard.writeText(link);
             toast({ title: 'Success', description: 'Approval link copied to clipboard!' });
@@ -268,7 +316,6 @@ const WagesRecordsPage = () => {
   const handleExport = (formatType: 'BSP' | 'BRED') => {
     if (!selectedApprovalId) {
       toast({ title: 'Error', description: 'Please select an approved pay period to export.', variant: 'destructive' });
-      console.error('Please select an approved pay period to export.');
       return;
     }
      if (selectedStatus !== 'approved') {
@@ -280,14 +327,12 @@ const WagesRecordsPage = () => {
 
     if (recordsToExport.length === 0) {
       toast({ title: 'Info', description: 'No records to export for this period.', variant: 'default' });
-      console.log('No records to export for this period.');
       return;
     }
 
     const selectedGroup = payPeriodSummaries.approved.find(g => g.approvalId === selectedApprovalId);
      if (!selectedGroup) {
          toast({ title: 'Error', description: 'Could not find selected period details.', variant: 'destructive' });
-         console.error('Could not find selected period details.');
          return;
      }
     const dateFromObj = parseISO(selectedGroup.dateFrom);
@@ -295,7 +340,6 @@ const WagesRecordsPage = () => {
 
     if (!isDateValid(dateFromObj) || !isDateValid(dateToObj)) {
       toast({ title: 'Error', description: 'Invalid date range for the selected period.', variant: 'destructive' });
-      console.error('Invalid date range for the selected period.');
       return;
     }
     const dateFromStr = format(dateFromObj, 'yyyyMMdd');
@@ -311,7 +355,6 @@ const WagesRecordsPage = () => {
 
     if (onlineTransferRecords.length === 0) {
         toast({ title: 'Info', description: `No online transfer employees found for this period.`, variant: 'default' });
-        console.log(`No online transfer employees found for this period.`);
         return;
     }
 
@@ -319,7 +362,7 @@ const WagesRecordsPage = () => {
     let fileName = `${fileNameBase}_${formatType}.csv`;
 
     if (formatType === 'BSP') {
-        const csvRows: string[] = []; 
+        const csvRows: string[] = [];
         onlineTransferRecords.forEach(record => {
             const employeeDetails = employees.find(emp => emp.id === record.employeeId);
             csvRows.push([
@@ -331,17 +374,17 @@ const WagesRecordsPage = () => {
             ].join(','));
         });
         csvData = csvRows.join('\n');
-    } else { 
-        const csvRows: string[][] = []; 
+    } else { // BRED
+        const csvRows: string[][] = [];
         onlineTransferRecords.forEach(record => {
             const employeeDetails = employees.find(emp => emp.id === record.employeeId);
             csvRows.push([
-                employeeDetails?.bankCode || '', 
-                record.employeeName,             
-                '',                              
-                employeeDetails?.bankAccountNumber || '', 
-                record.netPay.toFixed(2),        
-                'Salary',                        
+                employeeDetails?.bankCode || '',
+                record.employeeName,
+                '', // Empty Employee 2 Column
+                employeeDetails?.bankAccountNumber || '',
+                record.netPay.toFixed(2),
+                'Salary',
             ]);
         });
          csvData = csvRows.map(row => row.join(',')).join('\n');
@@ -357,7 +400,6 @@ const WagesRecordsPage = () => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     toast({ title: 'Success', description: `Wage records exported to CSV (${formatType}) successfully!` });
-    console.log(`Wage records exported to CSV (${formatType}) successfully!`);
   };
 
   // --- Payslip Generation (2 per page) ---
@@ -385,9 +427,9 @@ const WagesRecordsPage = () => {
        }
 
        const doc = new jsPDF({
-          orientation: 'p', 
-          unit: 'mm', 
-          format: 'a4' 
+          orientation: 'p',
+          unit: 'mm',
+          format: 'a4'
        });
 
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -398,46 +440,46 @@ const WagesRecordsPage = () => {
       const companyContact = "Phone: +679 9926898";
       const payPeriodStr = `${format(dateFromObj, 'dd/MM/yyyy')} - ${format(dateToObj, 'dd/MM/yyyy')}`;
 
-      const payslipHeight = (pageHeight / 2) - (margin/2); 
+      const payslipHeight = (pageHeight / 2) - (margin / 2); // Height for one payslip
       const contentWidth = pageWidth - 2 * margin;
 
-      const logoWidth = 20; 
-      const logoHeight = 10; 
+      const logoWidth = 20; // Adjust as needed
+      const logoHeight = 10; // Adjust as needed
 
       const drawPayslip = (record: WageRecord, employee: Employee | undefined, startY: number): number => {
-           if (!employee) return startY; 
+           if (!employee) return startY;
 
-           let currentY = startY + 5; 
+           let currentY = startY + 5;
 
             try {
-                 // Add logo using public path if available
-                // doc.addImage("/logo.png", 'PNG', margin, currentY - 5, logoWidth, logoHeight);
+                 // Placeholder for logo: you might need to load the image as a data URI or use a library function if jsPDF supports it directly
+                 // For now, just drawing a box for the logo.
+                 doc.rect(margin, currentY - 5, logoWidth, logoHeight); // Placeholder box for logo
+                 doc.text("Logo", margin + logoWidth / 2, currentY, { align: 'center' });
             } catch (e) {
-                console.error("Error adding logo to PDF. Ensure logo.png is in public folder.", e);
-                doc.rect(margin, currentY - 5, logoWidth, logoHeight);
-                doc.text("Logo", margin + logoWidth / 2, currentY, { align: 'center' });
+                console.error("Error adding logo placeholder to PDF.", e);
             }
            doc.setFontSize(14);
            doc.setFont('helvetica', 'bold');
-           doc.text(companyName, margin + logoWidth + 5, currentY, { align: 'left' }); 
+           doc.text(companyName, margin + logoWidth + 5, currentY, { align: 'left' });
            currentY += 5;
            doc.setFontSize(9);
            doc.setFont('helvetica', 'normal');
-           doc.text(companyAddress, margin + logoWidth + 5, currentY, { align: 'left' }); 
+           doc.text(companyAddress, margin + logoWidth + 5, currentY, { align: 'left' });
            currentY += 4;
-           doc.text(companyContact, margin + logoWidth + 5, currentY, { align: 'left' }); 
+           doc.text(companyContact, margin + logoWidth + 5, currentY, { align: 'left' });
            currentY += 6;
            doc.setFontSize(12);
            doc.setFont('helvetica', 'bold');
            doc.text('PAYSLIP', pageWidth / 2, currentY, { align: 'center' });
            currentY += 5;
            doc.setLineWidth(0.2);
-           doc.line(margin, currentY, pageWidth - margin, currentY); 
+           doc.line(margin, currentY, pageWidth - margin, currentY);
            currentY += 6;
 
            doc.setFontSize(9);
            const col1X = margin;
-           const col2X = margin + contentWidth / 2 + 5; 
+           const col2X = margin + contentWidth / 2 + 5;
            let detailY = currentY;
 
            doc.setFont('helvetica', 'bold');
@@ -476,16 +518,16 @@ const WagesRecordsPage = () => {
            }
 
            currentY = detailY + 6;
-           doc.line(margin, currentY - 1, pageWidth - margin, currentY - 1); 
+           doc.line(margin, currentY - 1, pageWidth - margin, currentY - 1); // Separator line
            currentY += 2;
 
-            let tableEndY = currentY; 
+            let tableEndY = currentY;
             autoTable(doc, {
                 startY: currentY,
                 head: [['Description', 'Rate ($)', 'Hours', 'Amount ($)']],
                 body: [
                     ['Normal Pay', record.hourlyWage.toFixed(2), record.hoursWorked.toFixed(2), (record.hourlyWage * record.hoursWorked).toFixed(2)],
-                    ['Overtime Pay', (record.hourlyWage * 1.5).toFixed(2), (record.overtimeHours || 0).toFixed(2), (record.hourlyWage * 1.5 * (record.overtimeHours || 0)).toFixed(2)],
+                    ['Overtime Pay', (record.hourlyWage * OVERTIME_RATE).toFixed(2), (record.overtimeHours || 0).toFixed(2), (record.hourlyWage * OVERTIME_RATE * (record.overtimeHours || 0)).toFixed(2)],
                     ['Meal Allowance', '', '', record.mealAllowance.toFixed(2)],
                     [{ content: 'Gross Earnings', styles: { fontStyle: 'bold'} }, '', '', { content: record.grossPay.toFixed(2), styles: { fontStyle: 'bold'} }],
                 ],
@@ -500,10 +542,10 @@ const WagesRecordsPage = () => {
                 },
                 margin: { left: margin, right: margin },
                 tableWidth: 'auto',
-                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } 
+                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } // Update tableEndY
              });
 
-             currentY = tableEndY + 1; 
+             currentY = tableEndY + 1; // Space after first table
 
              autoTable(doc, {
                 startY: currentY,
@@ -522,10 +564,10 @@ const WagesRecordsPage = () => {
                 },
                 margin: { left: margin, right: margin },
                 tableWidth: 'auto',
-                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } 
+                didDrawPage: (data) => { tableEndY = data.cursor?.y ?? tableEndY; } // Update tableEndY
              });
 
-             currentY = tableEndY + 6;
+             currentY = tableEndY + 6; // Space after second table
 
              doc.setFontSize(10);
              doc.setFont('helvetica', 'bold');
@@ -537,25 +579,26 @@ const WagesRecordsPage = () => {
              const paymentMethodText = `Payment Method: ${employee.paymentMethod === 'online' ? 'Online Transfer' : 'Cash'}`;
              doc.text(paymentMethodText, margin, currentY);
 
-             return currentY + 5; 
+             return currentY + 5; // Return Y position for next element
       };
 
       let payslipCounter = 0;
       selectedPeriodRecords.forEach((record, index) => {
            const employee = employees.find(emp => emp.id === record.employeeId);
            const isFirstOnPage = payslipCounter % 2 === 0;
-           const startY = isFirstOnPage ? margin : payslipHeight + (margin); 
+           const startY = isFirstOnPage ? margin : payslipHeight + (margin); // Start second payslip halfway down
 
-           if (index > 0 && isFirstOnPage) {
-               doc.addPage(); 
+           if (index > 0 && isFirstOnPage) { // If it's not the first payslip overall, but is the first on a NEW page
+               doc.addPage();
            }
 
            drawPayslip(record, employee, startY);
 
+           // Draw a line between payslips if it's the first one on the page and there's another one to follow
            if (isFirstOnPage && index < selectedPeriodRecords.length - 1) {
-               doc.setDrawColor(150); 
+               doc.setDrawColor(150); // Light gray line
                doc.setLineWidth(0.3);
-               doc.line(margin, payslipHeight + margin/2 , pageWidth - margin, payslipHeight + margin/2); 
+               doc.line(margin, payslipHeight + margin/2 , pageWidth - margin, payslipHeight + margin/2); // Line in the middle
            }
 
            payslipCounter++;
@@ -611,16 +654,16 @@ const WagesRecordsPage = () => {
       }
 
       const doc = new jsPDF({
-          orientation: 'l', 
+          orientation: 'l', // Landscape for wider table
           unit: 'mm',
           format: 'a4'
       });
 
       const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 10;
+      const marginVal = 10; // Renamed from margin to avoid conflict
       const companyName = "Lal's Motor Winders (FIJI) PTE Limited";
       const title = `Wage Summary (FNPF Eligible) - ${format(dateFromObj, 'dd/MM/yyyy')} to ${format(dateToObj, 'dd/MM/yyyy')}`;
-      let currentY = margin;
+      let currentY = marginVal;
 
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
@@ -671,26 +714,26 @@ const WagesRecordsPage = () => {
           startY: currentY,
           head: head,
           body: body,
-          theme: 'grid', 
-          headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' }, 
+          theme: 'grid',
+          headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
           styles: { fontSize: 8, cellPadding: 2 },
           columnStyles: {
-              0: { cellWidth: 'auto' }, 
-              1: { halign: 'right' }, 
-              2: { halign: 'right' }, 
-              3: { halign: 'right' }, 
-              4: { halign: 'right' }, 
-              5: { halign: 'right' }, 
-              6: { halign: 'right' }, 
-              7: { halign: 'right' }, 
-              8: { halign: 'right' }, 
+              0: { cellWidth: 'auto' }, // Employee Name
+              1: { halign: 'right' },    // Total Hours
+              2: { halign: 'right' },    // Normal Hours
+              3: { halign: 'right' },    // O/T Hrs
+              4: { halign: 'right' },    // Meal
+              5: { halign: 'right' },    // FNPF
+              6: { halign: 'right' },    // Deduction
+              7: { halign: 'right' },    // Gross
+              8: { halign: 'right' },    // Net
           },
-           footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 0 }, 
-            didParseCell: (data) => { 
-                if (data.row.index === body.length - 1) {
+           footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 0 }, // Style for the totals row
+            didParseCell: (data) => { // Custom styling for the totals row
+                if (data.row.index === body.length - 1) { // Check if it's the last row (totals row)
                     data.cell.styles.fontStyle = 'bold';
-                     data.cell.styles.fillColor = [230, 230, 230]; 
-                     data.cell.styles.textColor = 0; 
+                     data.cell.styles.fillColor = [230, 230, 230]; // Light gray background for totals
+                     data.cell.styles.textColor = 0; // Black text for totals
                 }
             }
       });
@@ -710,9 +753,9 @@ const WagesRecordsPage = () => {
               <TableHeader className="bg-white/10 sticky top-0 z-10">
                   <TableRow className="hover:bg-transparent">
                       <TableHead className="text-white border-r border-white/20">Pay Period</TableHead>
-                      <TableHead className="text-white border-r border-white/20 text-right">Total Wages</TableHead>
-                      <TableHead className="text-white border-r border-white/20 text-right">Total Cash</TableHead> 
-                      <TableHead className="text-white border-r border-white/20 text-right">Total Online</TableHead> 
+                      <TableHead className="text-white border-r border-white/20 text-right">Total Net Pay</TableHead>
+                      <TableHead className="text-white border-r border-white/20 text-right">Total Cash</TableHead>
+                      <TableHead className="text-white border-r border-white/20 text-right">Total Online</TableHead>
                       <TableHead className="text-white text-center">Actions</TableHead>
                   </TableRow>
               </TableHeader>
@@ -728,54 +771,69 @@ const WagesRecordsPage = () => {
                     return (
                       <TableRow
                           key={period.approvalId}
-                          onClick={() => handlePeriodSelect(period.approvalId)} 
+                          onClick={() => handlePeriodSelect(period.approvalId)}
                           className={cn(
-                          "border-t border-white/10 hover:bg-white/15 cursor-pointer", 
+                          "border-t border-white/10 hover:bg-white/15 cursor-pointer",
                           selectedApprovalId === period.approvalId && "bg-white/25 font-semibold"
                           )}
                       >
                           <TableCell className="font-medium text-white border-r border-white/20">{formattedPeriod}</TableCell>
                           <TableCell className="text-white border-r border-white/20 text-right">${period.totalWages.toFixed(2)}</TableCell>
-                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalCashWages.toFixed(2)}</TableCell> 
-                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalOnlineWages.toFixed(2)}</TableCell> 
+                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalCashWages.toFixed(2)}</TableCell>
+                          <TableCell className="text-white border-r border-white/20 text-right">${period.totalOnlineWages.toFixed(2)}</TableCell>
                           <TableCell className="text-center">
                               <Button
                                   variant="destructive"
                                   size="sm"
                                   onClick={(e) => {
-                                        e.stopPropagation(); 
-                                        initiateDelete(period.approvalId);
+                                        e.stopPropagation();
+                                        initiateAction(period.approvalId, 'delete');
                                   }}
-                                  className="h-7 px-2 mr-2" 
-                                  disabled={isDeleting && selectedApprovalId === period.approvalId}
+                                  className="h-7 px-2 mr-2"
+                                  disabled={isProcessing && selectedApprovalId === period.approvalId && actionType === 'delete'}
                                   title="Delete Period Records"
                               >
-                                  {isDeleting && selectedApprovalId === period.approvalId ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <Trash2 className="h-3.5 w-3.5" />}
+                                  {(isProcessing && selectedApprovalId === period.approvalId && actionType === 'delete') ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <Trash2 className="h-3.5 w-3.5" />}
                                   <span className="sr-only">Delete Period</span>
                               </Button>
 
                               {status === 'pending' && period.token && (
+                                <>
                                   <Button
                                       variant="outline"
                                       size="sm"
                                       onClick={(e) => {
-                                          e.stopPropagation(); 
-                                          handleApprovalLinkAction(period.approvalId, period.token);
+                                          e.stopPropagation();
+                                          handleCopyApprovalLink(period.token);
                                       }}
-                                      className="h-7 px-2 text-white hover:bg-white/10 mr-2" 
+                                      className="h-7 px-2 text-white hover:bg-white/10 mr-2"
                                       title="Copy Approval Link"
                                   >
                                       <Copy className="h-3.5 w-3.5" />
                                       <span className="sr-only">Copy Approval Link</span>
                                   </Button>
+                                  <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            initiateAction(period.approvalId, 'resend');
+                                        }}
+                                        className="h-7 px-2 text-white hover:bg-white/10 mr-2"
+                                        title="Resend Approval Link"
+                                        disabled={isProcessing && selectedApprovalId === period.approvalId && actionType === 'resend'}
+                                    >
+                                     {(isProcessing && selectedApprovalId === period.approvalId && actionType === 'resend') ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <RefreshCw className="h-3.5 w-3.5" />}
+                                     <span className="sr-only">Resend Approval Link</span>
+                                  </Button>
+                                </>
                               )}
-                               {/* Edit Button for Pending and Approved Records */}
                               {(status === 'pending' || status === 'approved') && (
                                 <Link href={`/wages/edit?approvalId=${period.approvalId}`} passHref>
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={(e) => e.stopPropagation()} // Prevent row selection
+                                        onClick={(e) => e.stopPropagation()}
                                         className="h-7 px-2 text-white hover:bg-white/10 mr-2"
                                         title="Edit Wage Records"
                                     >
@@ -795,7 +853,7 @@ const WagesRecordsPage = () => {
                                             <FileDown className="h-3.5 w-3.5 mr-1" /> BRED
                                         </Button>
                                           <Button variant="secondary" size="sm" onClick={(e) => {e.stopPropagation(); handleDownloadPayslips();}} className="h-7 px-2 mr-2 bg-purple-600 hover:bg-purple-700 text-white" title="Download Payslips PDF">
-                                             <FileType className="h-3.5 w-3.5 mr-1" /> Payslips
+                                             <Download className="h-3.5 w-3.5 mr-1" /> Payslips
                                          </Button>
                                          <Button
                                               variant="secondary"
@@ -814,7 +872,7 @@ const WagesRecordsPage = () => {
                   })
               ) : (
                   <TableRow>
-                  <TableCell colSpan={5} className="text-center text-gray-400 py-4"> 
+                  <TableCell colSpan={5} className="text-center text-gray-400 py-4">
                       No records found for this status.
                   </TableCell>
                   </TableRow>
@@ -827,6 +885,7 @@ const WagesRecordsPage = () => {
 
   // --- Render ---
   return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow min-h-screen text-white font-sans">
        <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-6 bg-black/60 backdrop-blur-md">
          <Link href="/wages" passHref className="ml-4">
@@ -835,7 +894,7 @@ const WagesRecordsPage = () => {
              <span className="sr-only">Back to Wages Management</span>
            </Button>
          </Link>
-         <h1 className="text-xl sm:text-2xl font-semibold text-center text-gray-100 flex-grow px-4">
+         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 flex-grow">
            Wage Records
          </h1>
          <div className="flex items-center gap-2 mr-4">
@@ -868,7 +927,7 @@ const WagesRecordsPage = () => {
                  </TabsTrigger>
                </TabsList>
 
-               {isLoading && !selectedApprovalId ? ( 
+               {isLoading && !selectedApprovalId ? (
                  <div className="text-center text-white py-10 flex items-center justify-center">
                    <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading records list...
                  </div>
@@ -887,7 +946,7 @@ const WagesRecordsPage = () => {
                )}
              </Tabs>
 
-            {isLoading && selectedApprovalId && ( 
+            {isLoading && selectedApprovalId && (
                 <div className="text-center text-white py-10 flex items-center justify-center">
                     <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading period details...
                 </div>
@@ -896,7 +955,7 @@ const WagesRecordsPage = () => {
                <div className="mt-6">
                  <h3 className="text-lg font-medium text-white mb-4 text-center">
                    Wage Details for {
-                      (()=>{ 
+                      (()=>{
                             const period = [...payPeriodSummaries.approved, ...payPeriodSummaries.declined, ...payPeriodSummaries.pending]
                                             .find(g => g.approvalId === selectedApprovalId);
                             if (!period) return 'Selected Period';
@@ -911,7 +970,7 @@ const WagesRecordsPage = () => {
                  <div className="border border-white/20 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
                    <Table>
                      <TableHeader className="bg-white/10 sticky top-0 z-10">
-                         <TableRow className="hover:bg-transparent">
+                         <TableRow>
                              <TableHead className="text-white border-r border-white/20">Employee</TableHead>
                              <TableHead className="text-white border-r border-white/20">Bank Code</TableHead>
                              <TableHead className="text-white border-r border-white/20">Account #</TableHead>
@@ -979,12 +1038,15 @@ const WagesRecordsPage = () => {
          </Card>
        </main>
 
-        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialog open={showActionDialog} onOpenChange={(open) => !open && closeDialog()}>
             <AlertDialogContent className="bg-gray-900 border-white/20 text-white">
               <AlertDialogHeader>
-                <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+                <AlertDialogTitle>Confirm {actionType ? actionType.charAt(0).toUpperCase() + actionType.slice(1) : 'Action'}</AlertDialogTitle>
                 <AlertDialogDescription className="text-gray-300">
-                  Are you sure you want to delete all wage records for the selected period? This action cannot be undone. Please enter the admin password to confirm.
+                  Are you sure you want to {actionType} this period?
+                  {actionType === 'delete' && " This action cannot be undone."}
+                  {actionType === 'resend' && " This will generate a new approval link."}
+                  Please enter the admin password to confirm.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="grid gap-2">
@@ -992,10 +1054,10 @@ const WagesRecordsPage = () => {
                 <Input
                   id="action-password"
                   type="password"
-                  value={deletePassword}
-                  onChange={(e) => setDeletePassword(e.target.value)}
+                  value={actionPassword}
+                  onChange={(e) => setActionPassword(e.target.value)}
                   className="bg-gray-800 border-white/20 text-white"
-                  onKeyPress={(e) => { if (e.key === 'Enter') handleDeleteRecords(); }}
+                  onKeyPress={(e) => { if (e.key === 'Enter') handleConfirmAction(); }}
                 />
               </div>
                <AlertDialogFooter>
@@ -1003,18 +1065,19 @@ const WagesRecordsPage = () => {
                    Cancel
                  </AlertDialogCancel>
                  <AlertDialogAction
-                   onClick={handleDeleteRecords}
+                   onClick={handleConfirmAction}
                    className={cn(
-                     actionType === 'delete' ? "bg-red-600 hover:bg-red-700" : "bg-yellow-600 hover:bg-yellow-700" 
+                     actionType === 'delete' ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700" // Default to blue for resend
                    )}
                    disabled={isProcessing}
                  >
-                   {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : `Confirm Deletion`}
+                   {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : `Confirm ${actionType ? actionType.charAt(0).toUpperCase() + actionType.slice(1) : 'Action'}`}
                  </AlertDialogAction>
                </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
     </div>
+   </div>
   );
 };
 

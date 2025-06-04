@@ -1,253 +1,449 @@
 
 'use client';
 
-import Image from 'next/image';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Power, Loader2 } from 'lucide-react'; // Added Loader2
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-    ResponsiveContainer,
-    LineChart,
-    Line,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    Legend,
-} from 'recharts';
-import { format, parseISO, isValid } from 'date-fns';
-import { getWageRecords } from '@/services/employee-service'; // Import service to fetch wage records
-
-// Interface for wage records fetched from the database
-interface WageRecord {
-  id?: string; // DB record ID
-  employeeId: string;
-  employeeName: string;
-  hourlyWage: number;
-  totalHours: number; // Added total hours
-  hoursWorked: number;
-  overtimeHours: number;
-  mealAllowance: number;
-  fnpfDeduction: number;
-  otherDeductions: number;
-  grossPay: number;
-  netPay: number;
-  dateFrom: string; // Stored as YYYY-MM-DD string from DB
-  dateTo: string;
-  created_at?: Date; // Optional timestamp from DB
-}
-
-// Interface for data points in the chart
-interface ChartDataPoint {
-  payPeriod: string; // e.g., "Jan 01 - Jan 07, 2024"
-  totalNetPay: number;
-}
+import Image from 'next/image'; // Added import for Next/Image
+import { Power, Loader2, User, Briefcase, Cog, TrendingUp, DollarSign, Users, Calendar, Activity, BarChart3, Eye, EyeOff, BarChartHorizontalBig, UserPlus } from 'lucide-react';
+import { getEmployees, getWageRecords, type Employee, type WageRecord } from '@/services/employee-service';
+import { useToast } from '@/hooks/use-toast';
+import { format, parseISO, startOfYear, endOfYear, subMonths } from 'date-fns';
 
 const DashboardPage = () => {
-  const [wageRecords, setWageRecords] = useState<WageRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loading, setLoading] = useState<{ [key: string]: boolean }>({}); // Loading state for navigation buttons
   const router = useRouter();
+  const { toast } = useToast();
 
-  // Fetch wage records
-  const fetchWages = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const records = await getWageRecords(); // Fetch all records
-      setWageRecords(records);
-    } catch (error) {
-      console.error("Error fetching wage records for dashboard:", error);
-      // Handle error appropriately, maybe show a message
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  const [wageRecords, setWageRecords] = useState<WageRecord[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loadingNav, setLoadingNav] = useState<{ [key: string]: boolean }>({});
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [authCheckLoading, setAuthCheckLoading] = useState(true);
+  const [showSalaryDetails, setShowSalaryDetails] = useState(false);
 
   useEffect(() => {
-    fetchWages();
-  }, [fetchWages]);
+    const storedUser = localStorage.getItem('username');
+    if (!storedUser) {
+      router.replace('/');
+    } else {
+      setCurrentUser(storedUser);
+      setAuthCheckLoading(false);
+    }
+  }, [router]);
 
-  // Process data for the chart
-  const chartData = useMemo(() => {
-    const groupedByPeriod: { [key: string]: number } = {};
+  useEffect(() => {
+    if (authCheckLoading || !currentUser) return;
 
-    wageRecords.forEach(record => {
-      // Ensure date strings are valid before parsing
-      const validDateFromStr = /^\d{4}-\d{2}-\d{2}$/.test(record.dateFrom) ? record.dateFrom : null;
-      const validDateToStr = /^\d{4}-\d{2}-\d{2}$/.test(record.dateTo) ? record.dateTo : null;
+    const fetchData = async () => {
+      setIsLoadingData(true);
+      try {
+        // Fetch approved wage records from the start of the last 6 months until now
+        const sixMonthsAgo = subMonths(new Date(), 6);
+        const startDate = format(startOfYear(sixMonthsAgo), 'yyyy-MM-dd'); // Start of that month's year for broader data
+        const endDate = format(new Date(), 'yyyy-MM-dd');
+        
+        const [fetchedWageRecords, fetchedEmployees] = await Promise.all([
+          getWageRecords(startDate, endDate, 'approved', null),
+          getEmployees(false) // Fetch only active employees
+        ]);
 
-      if (!validDateFromStr || !validDateToStr) {
-        console.warn("Skipping record with invalid date string format:", record);
-        return; // Skip this record
+        // Sort wage records by dateFrom ascending for chart
+        const sortedWageRecords = fetchedWageRecords.sort((a, b) =>
+          parseISO(a.dateFrom).getTime() - parseISO(b.dateFrom).getTime()
+        );
+        setWageRecords(sortedWageRecords);
+        setEmployees(fetchedEmployees);
+
+      } catch (error: any) {
+        console.error("Failed to fetch dashboard data:", error);
+        toast({
+          title: "Error Fetching Data",
+          description: error.message || "Could not load dashboard data.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingData(false);
       }
+    };
 
-       // Add time part for correct ISO parsing, assuming start of day
-      const dateFrom = parseISO(validDateFromStr + 'T00:00:00');
-      const dateTo = parseISO(validDateToStr + 'T00:00:00');
+    if (currentUser !== 'Priyanka Sharma') { // Priyanka doesn't need this data
+        fetchData();
+    } else {
+        setIsLoadingData(false); // No data to load for Priyanka's specific view
+    }
+  }, [currentUser, authCheckLoading, toast]);
 
-      if (isValid(dateFrom) && isValid(dateTo)) {
-        const periodKey = `${format(dateFrom, 'MMM dd')} - ${format(dateTo, 'MMM dd, yyyy')}`; // Format for X-axis label
-        groupedByPeriod[periodKey] = (groupedByPeriod[periodKey] || 0) + record.netPay;
-      } else {
-         console.warn("Skipping record with invalid parsed date:", record, dateFrom, dateTo);
-      }
-    });
 
-    // Convert to array and sort by period start date (implicitly by key string format for now)
-    return Object.entries(groupedByPeriod)
-      .map(([payPeriod, totalNetPay]) => ({ payPeriod, totalNetPay }))
-      // A more robust sort might be needed if keys don't sort chronologically naturally
-      .sort((a, b) => {
-          // Attempt to parse start date from key for sorting
-          try {
-             const dateA = parseISO(a.payPeriod.split(' - ')[0] + ', ' + a.payPeriod.split(', ')[1]);
-             const dateB = parseISO(b.payPeriod.split(' - ')[0] + ', ' + b.payPeriod.split(', ')[1]);
-             if (isValid(dateA) && isValid(dateB)) {
-                 return dateA.getTime() - dateB.getTime();
-             }
-          } catch (e) {
-              // Fallback to string sort if parsing fails
-             return a.payPeriod.localeCompare(b.payPeriod);
-          }
-          return a.payPeriod.localeCompare(b.payPeriod); // Fallback sort
-      });
-
-  }, [wageRecords]);
+  const handleNavigation = (path: string) => {
+    setLoadingNav(prev => ({ ...prev, [path]: true }));
+    router.push(path);
+    // setLoading will be implicitly false on page change, or you might want to reset if staying on page (not the case here)
+  };
 
   const handleLogout = () => {
-    router.push('/'); // Redirect to the login page
+    setLoadingNav(prev => ({ ...prev, logout: true }));
+    localStorage.removeItem('username');
+    toast({ title: "Logged Out", description: "You have been successfully logged out." });
+    router.push('/');
   };
 
-   const handleNavigation = (path: string) => {
-    setLoading((prev) => ({ ...prev, [path]: true }));
-    router.push(path);
-    // No need to setLoading back to false if navigating away
-  };
+  const isPriyanka = currentUser === 'Priyanka Sharma';
+
+  const dashboardStats = useMemo(() => {
+    if (isPriyanka || wageRecords.length === 0) {
+        return { totalNetPay: 0, totalGrossPay: 0, avgNetPay: 0, activeEmployees: employees.length, totalPayPeriods: 0, growth: 0 };
+    }
+    const totalNetPay = wageRecords.reduce((sum, record) => sum + (record.netPay || 0), 0);
+    const totalGrossPay = wageRecords.reduce((sum, record) => sum + (record.grossPay || 0), 0);
+    const uniquePayPeriods = new Set(wageRecords.map(r => `${r.dateFrom}-${r.dateTo}`)).size;
+    const avgNetPay = uniquePayPeriods > 0 ? totalNetPay / uniquePayPeriods : 0;
+    
+    return {
+      totalNetPay,
+      totalGrossPay,
+      avgNetPay,
+      activeEmployees: employees.filter(emp => emp.isActive).length,
+      totalPayPeriods: uniquePayPeriods,
+      growth: 12.5 // Placeholder: Growth calculation logic needs to be defined
+    };
+  }, [wageRecords, employees, isPriyanka]);
+
+  const chartData = useMemo(() => {
+    if (isPriyanka || wageRecords.length === 0) return [];
+    // Group by pay period (dateFrom-dateTo) and sum netPay
+    const periodDataMap = new Map<string, { netPay: number; grossPay: number; dateFrom: string }>();
+    wageRecords.forEach(record => {
+        const periodKey = `${record.dateFrom}_${record.dateTo}`;
+        const existing = periodDataMap.get(periodKey) || { netPay: 0, grossPay: 0, dateFrom: record.dateFrom };
+        existing.netPay += (record.netPay || 0);
+        existing.grossPay += (record.grossPay || 0);
+        periodDataMap.set(periodKey, existing);
+    });
+
+    return Array.from(periodDataMap.entries())
+        .map(([key, value], index) => ({
+            period: `Period ${index + 1} (${format(parseISO(value.dateFrom), 'MMM dd')})`,
+            netPay: value.netPay,
+            grossPay: value.grossPay,
+            date: value.dateFrom
+        }))
+        .sort((a,b) => parseISO(a.date).getTime() - parseISO(b.date).getTime()) // Ensure chronological for chart
+        .slice(-6); // Show last 6 periods
+  }, [wageRecords, isPriyanka]);
+
+  if (authCheckLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+        <div className="text-center">
+          <Loader2 className="h-16 w-16 animate-spin text-blue-400 mx-auto mb-4" />
+          <p className="text-white text-lg">Authenticating...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    // Removed outer div with background image and overlay, as it's handled globally
-    <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col flex-grow min-h-screen text-white font-sans">
-        {/* Header Section - Made sticky */}
-        <header className="sticky top-0 z-50 w-full py-4 flex justify-between items-center border-b border-white/20 mb-10 sm:mb-16 bg-black/60 backdrop-blur-md">
-             {/* Logo */}
-             <div className="w-10 h-10 flex-shrink-0 ml-4 mr-4"> {/* Added margin right */}
-                <Image src="/logo.png" alt="Company Logo" width={40} height={40} />
-             </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000"></div>
+        <div className="absolute top-40 left-1/2 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-10 animate-pulse animation-delay-4000"></div>
+      </div>
 
-             {/* Centered Title */}
-             <div className="flex-grow text-center">
-                 <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-gray-100">
-                     Lal&apos;s Motor Winders (FIJI) PTE Limited Dashboard
-                 </h1>
-             </div>
-
-             {/* Logout Button */}
-             <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleLogout}
-                className="text-red-400 hover:bg-white/10 hover:text-red-300 flex-shrink-0 ml-4 mr-4" // Added margin left & right
-                aria-label="Logout"
-             >
-                 <Power className="h-5 w-5" />
-                 <span className="sr-only">Logout</span>
-             </Button>
-         </header>
-
-         {/* Content Area - Adjusted top margin/padding implicitly by sticky header */}
-        <div className="flex-grow flex flex-col items-center justify-start w-full pb-16 pt-6"> {/* Added pt-6 */}
-
-             {/* Navigation Section - Centered */}
-             <nav className="w-full flex justify-center items-center gap-5 py-4 mb-10">
-              <Button
-                onClick={() => handleNavigation('/employees')}
-                variant="secondary"
-                size="lg"
-                className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
-                disabled={loading['/employees']}
-               >
-                 {loading['/employees'] ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Employee Management'}
-               </Button>
-               <Button
-                 onClick={() => handleNavigation('/wages')}
-                 variant="secondary"
-                 size="lg"
-                 className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
-                 disabled={loading['/wages']}
-               >
-                  {loading['/wages'] ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Wages Management'}
-               </Button>
-               <Button
-                 onClick={() => handleNavigation('/admin')}
-                 variant="secondary"
-                 size="lg"
-                 className="hover:bg-gray-700/80 transition-all duration-300 bg-white/10 border border-white/20 backdrop-blur-sm text-white"
-                 disabled={loading['/admin']}
-               >
-                 {loading['/admin'] ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Administrator'}
-               </Button>
-             </nav>
-
-            {/* Main Content Area - Graph Section */}
-            {/* Changed to div as main is in RootLayout */}
-            <div className="flex-grow flex items-center justify-center w-full">
-               <Card className="w-full max-w-4xl bg-black/40 backdrop-blur-sm border border-white/20 rounded-xl p-6 shadow-xl">
-                 <CardHeader>
-                   <CardTitle className="text-white text-center text-xl mb-4">
-                     Total Net Pay Trend per Pay Period
-                   </CardTitle>
-                 </CardHeader>
-                 <CardContent>
-                   {isLoading ? (
-                     <div className="text-center text-gray-400">Loading chart data...</div>
-                   ) : chartData.length > 0 ? (
-                       <ResponsiveContainer width="100%" height={300}>
-                         <LineChart
-                           data={chartData}
-                           margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                         >
-                           <CartesianGrid strokeDasharray="3 3" stroke="#555" />
-                           <XAxis
-                             dataKey="payPeriod"
-                             stroke="#ccc"
-                             tick={{ fontSize: 10 }} // Smaller font size for x-axis labels
-                             angle={-30} // Angle labels if they overlap
-                             textAnchor="end" // Adjust anchor for angled labels
-                             height={50} // Increase height to accommodate angled labels
-                             interval={0} // Show all labels initially, adjust if needed
-                           />
-                           <YAxis stroke="#ccc" tickFormatter={(value) => `$${value.toFixed(0)}`} />
-                           <Tooltip
-                             contentStyle={{ backgroundColor: '#333', border: 'none', borderRadius: '5px' }}
-                             labelStyle={{ color: '#fff' }}
-                             itemStyle={{ color: '#88d1ff' }} // Light blue for tooltip item
-                             formatter={(value: number) => [`$${value.toFixed(2)}`, 'Total Net Pay']}
-                           />
-                           <Legend wrapperStyle={{ color: '#ccc' }} />
-                           <Line
-                             type="monotone"
-                             dataKey="totalNetPay"
-                             stroke="#88d1ff" // Light blue line color
-                             strokeWidth={2}
-                             dot={{ r: 4, fill: "#88d1ff" }} // Style points
-                             activeDot={{ r: 6, fill: "#fff", stroke: "#88d1ff" }} // Style active point
-                             name="Total Net Pay" // Legend name
-                           />
-                         </LineChart>
-                       </ResponsiveContainer>
-                   ) : (
-                     <div className="text-center text-gray-400">No wage data available to display the chart.</div>
-                   )}
-                 </CardContent>
-               </Card>
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-screen">
+        <header className="sticky top-0 z-50 w-full py-6 mb-8">
+          <div className="bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl p-4 shadow-2xl">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-4">
+                <Image
+                  src="/logo.png"
+                  alt="Lal's Motor Winders Logo"
+                  width={48}
+                  height={48}
+                  className="rounded-xl"
+                />
+                <div>
+                  <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400">
+                    Lal&apos;s Motor Winders (FIJI) PTE Limited
+                  </h1>
+                  <p className="text-gray-400 text-sm">
+                    {isPriyanka ? 'Suva Branch Timesheet Access' : 'Payroll Management Dashboard'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div className="text-right">
+                  <p className="text-white font-medium">Welcome, {currentUser}</p>
+                  <p className="text-gray-400 text-sm">{new Date().toLocaleDateString()}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  disabled={loadingNav['logout']}
+                  className="p-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-xl transition-all duration-300 group"
+                  aria-label="Logout"
+                >
+                  {loadingNav['logout'] ? 
+                    <Loader2 className="h-5 w-5 text-red-300 animate-spin" /> :
+                    <Power className="h-5 w-5 text-red-400 group-hover:text-red-300" />
+                  }
+                </button>
+              </div>
             </div>
-        </div>
-        {/* Footer is handled by RootLayout */}
+          </div>
+        </header>
+
+        <nav className="mb-8">
+          <div className="flex flex-wrap justify-center gap-4">
+            {isPriyanka ? (
+              <>
+                <button
+                  onClick={() => handleNavigation('/wages/timesheet')}
+                  disabled={loadingNav['/wages/timesheet']}
+                  className="group relative overflow-hidden bg-gradient-to-r from-blue-500/20 to-purple-500/20 hover:from-blue-500/30 hover:to-purple-500/30 border border-white/10 rounded-2xl p-6 transition-all duration-300 hover:scale-105 hover:shadow-2xl backdrop-blur-sm flex items-center space-x-3"
+                >
+                  {loadingNav['/wages/timesheet'] ? 
+                    <Loader2 className="h-6 w-6 animate-spin text-blue-400" /> : 
+                    <User className="h-6 w-6 text-blue-400 group-hover:scale-110 transition-transform" />
+                  }
+                  <span className="text-white font-medium">Timesheet Entry</span>
+                </button>
+                <button
+                  onClick={() => handleNavigation('/wages/timesheet-records')}
+                  disabled={loadingNav['/wages/timesheet-records']}
+                  className="group relative overflow-hidden bg-gradient-to-r from-green-500/20 to-blue-500/20 hover:from-green-500/30 hover:to-blue-500/30 border border-white/10 rounded-2xl p-6 transition-all duration-300 hover:scale-105 hover:shadow-2xl backdrop-blur-sm flex items-center space-x-3"
+                >
+                  {loadingNav['/wages/timesheet-records'] ? 
+                    <Loader2 className="h-6 w-6 animate-spin text-green-400" /> : 
+                    <Briefcase className="h-6 w-6 text-green-400 group-hover:scale-110 transition-transform" />
+                  }
+                  <span className="text-white font-medium">Records & Review</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleNavigation('/employees')}
+                  disabled={loadingNav['/employees']}
+                  className="group relative overflow-hidden bg-gradient-to-r from-blue-500/20 to-cyan-500/20 hover:from-blue-500/30 hover:to-cyan-500/30 border border-white/10 rounded-2xl p-6 transition-all duration-300 hover:scale-105 hover:shadow-2xl backdrop-blur-sm flex items-center space-x-3"
+                >
+                  {loadingNav['/employees'] ? 
+                    <Loader2 className="h-6 w-6 animate-spin text-blue-400" /> : 
+                    <Users className="h-6 w-6 text-blue-400 group-hover:scale-110 transition-transform" />
+                  }
+                  <span className="text-white font-medium">Employee Management</span>
+                </button>
+                <button
+                  onClick={() => handleNavigation('/wages')}
+                  disabled={loadingNav['/wages']}
+                  className="group relative overflow-hidden bg-gradient-to-r from-green-500/20 to-emerald-500/20 hover:from-green-500/30 hover:to-emerald-500/30 border border-white/10 rounded-2xl p-6 transition-all duration-300 hover:scale-105 hover:shadow-2xl backdrop-blur-sm flex items-center space-x-3"
+                >
+                  {loadingNav['/wages'] ? 
+                    <Loader2 className="h-6 w-6 animate-spin text-green-400" /> : 
+                    <Briefcase className="h-6 w-6 text-green-400 group-hover:scale-110 transition-transform" />
+                  }
+                  <span className="text-white font-medium">Wages Management</span>
+                </button>
+                {currentUser === 'ADMIN' && (
+                  <button
+                    onClick={() => handleNavigation('/admin')}
+                    disabled={loadingNav['/admin']}
+                    className="group relative overflow-hidden bg-gradient-to-r from-purple-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 border border-white/10 rounded-2xl p-6 transition-all duration-300 hover:scale-105 hover:shadow-2xl backdrop-blur-sm flex items-center space-x-3"
+                  >
+                    {loadingNav['/admin'] ? 
+                      <Loader2 className="h-6 w-6 animate-spin text-purple-400" /> : 
+                      <Cog className="h-6 w-6 text-purple-400 group-hover:scale-110 transition-transform" />
+                    }
+                    <span className="text-white font-medium">Administrator</span>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </nav>
+
+        <main className="pb-8">
+          {isLoadingData && !isPriyanka ? (
+             <div className="flex justify-center items-center min-h-[40vh] bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl p-12">
+                <div className="text-center">
+                    <Loader2 className="h-16 w-16 animate-spin text-blue-400 mx-auto mb-4" />
+                    <p className="text-white text-lg">Loading dashboard data...</p>
+                </div>
+            </div>
+          ) : !isPriyanka ? (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 backdrop-blur-xl border border-white/10 rounded-2xl p-6 hover:scale-105 transition-all duration-300 group">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-blue-500/20 rounded-xl">
+                      <DollarSign className="h-6 w-6 text-blue-400" />
+                    </div>
+                    <button
+                      onClick={() => setShowSalaryDetails(!showSalaryDetails)}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                      aria-label={showSalaryDetails ? "Hide salary details" : "Show salary details"}
+                    >
+                      {showSalaryDetails ? 
+                        <EyeOff className="h-4 w-4 text-gray-400" /> : 
+                        <Eye className="h-4 w-4 text-gray-400" />
+                      }
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-gray-400 text-sm">Total Net Pay (Last 6m)</p>
+                    <p className="text-3xl font-bold text-white">
+                      {showSalaryDetails ? `$${dashboardStats.totalNetPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '****'}
+                    </p>
+                    <div className="flex items-center space-x-2">
+                      <TrendingUp className="h-4 w-4 text-green-400" />
+                      <span className="text-green-400 text-sm">+{dashboardStats.growth}% (mock)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-500/20 to-green-600/20 backdrop-blur-xl border border-white/10 rounded-2xl p-6 hover:scale-105 transition-all duration-300">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-green-500/20 rounded-xl">
+                      <Users className="h-6 w-6 text-green-400" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-gray-400 text-sm">Active Employees</p>
+                    <p className="text-3xl font-bold text-white">{dashboardStats.activeEmployees}</p>
+                    <p className="text-green-400 text-sm">Currently Active</p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 backdrop-blur-xl border border-white/10 rounded-2xl p-6 hover:scale-105 transition-all duration-300">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-purple-500/20 rounded-xl">
+                      <Calendar className="h-6 w-6 text-purple-400" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-gray-400 text-sm">Processed Pay Periods (Last 6m)</p>
+                    <p className="text-3xl font-bold text-white">{dashboardStats.totalPayPeriods}</p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-orange-500/20 to-orange-600/20 backdrop-blur-xl border border-white/10 rounded-2xl p-6 hover:scale-105 transition-all duration-300">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-orange-500/20 rounded-xl">
+                      <Activity className="h-6 w-6 text-orange-400" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-gray-400 text-sm">Avg. Net Pay (Per Period)</p>
+                    <p className="text-3xl font-bold text-white">
+                      {showSalaryDetails ? `$${Math.round(dashboardStats.avgNetPay).toLocaleString()}` : '****'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl p-8 hover:shadow-2xl transition-all duration-300">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white mb-2">Pay Trend Analysis (Last 6 Periods)</h2>
+                    <p className="text-gray-400">Net pay distribution over recent pay periods</p>
+                  </div>
+                  <div className="p-3 bg-blue-500/20 rounded-xl">
+                    <BarChart3 className="h-6 w-6 text-blue-400" />
+                  </div>
+                </div>
+                
+                {chartData.length === 0 && !isLoadingData ? (
+                    <p className="text-center text-gray-400 py-10">No pay data available for chart.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {chartData.map((item, index) => (
+                      <div key={index} className="flex items-center space-x-4 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors">
+                        <div className="w-32 text-sm text-gray-400">{item.period}</div>
+                        <div className="flex-1">
+                          <div className="h-8 bg-gray-700 rounded-lg overflow-hidden relative">
+                            <div 
+                              className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg transition-all duration-1000 ease-out"
+                              style={{ width: `${(item.netPay / Math.max(...chartData.map(d => d.netPay), 1)) * 100}%` }}
+                            ></div>
+                            <div className="absolute inset-0 flex items-center px-3">
+                              <span className="text-white text-sm font-medium">
+                                {showSalaryDetails ? `$${item.netPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '****'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="w-20 text-right">
+                          <div className="text-xs text-gray-400">Net Pay</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
+                <h2 className="text-2xl font-bold text-white mb-6">Quick Actions</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <button 
+                    onClick={() => handleNavigation('/employees/create')}
+                    disabled={loadingNav['/employees/create']}
+                    className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-600/10 border border-blue-500/20 rounded-xl hover:from-blue-500/20 hover:to-blue-600/20 transition-all duration-300 text-left group flex flex-col items-start"
+                  >
+                    <div className="flex items-center mb-3">
+                        {loadingNav['/employees/create'] ? <Loader2 className="h-8 w-8 text-blue-400 animate-spin"/> : <UserPlus className="h-8 w-8 text-blue-400 group-hover:scale-110 transition-transform" />}
+                    </div>
+                    <h3 className="text-white font-medium mb-1">Add New Employee</h3>
+                    <p className="text-gray-400 text-sm">Quickly register a new team member</p>
+                  </button>
+                  <button 
+                    onClick={() => handleNavigation('/wages/create')}
+                    disabled={loadingNav['/wages/create']}
+                    className="p-6 bg-gradient-to-br from-green-500/10 to-green-600/10 border border-green-500/20 rounded-xl hover:from-green-500/20 hover:to-green-600/20 transition-all duration-300 text-left group flex flex-col items-start"
+                  >
+                     <div className="flex items-center mb-3">
+                        {loadingNav['/wages/create'] ? <Loader2 className="h-8 w-8 text-green-400 animate-spin"/> : <DollarSign className="h-8 w-8 text-green-400 group-hover:scale-110 transition-transform" />}
+                    </div>
+                    <h3 className="text-white font-medium mb-1">Process Payroll</h3>
+                    <p className="text-gray-400 text-sm">Calculate and approve wages</p>
+                  </button>
+                  <button 
+                    onClick={() => handleNavigation('/wages/records')}
+                    disabled={loadingNav['/wages/records']}
+                    className="p-6 bg-gradient-to-br from-purple-500/10 to-purple-600/10 border border-purple-500/20 rounded-xl hover:from-purple-500/20 hover:to-purple-600/20 transition-all duration-300 text-left group flex flex-col items-start"
+                  >
+                     <div className="flex items-center mb-3">
+                        {loadingNav['/wages/records'] ? <Loader2 className="h-8 w-8 text-purple-400 animate-spin"/> :  <BarChartHorizontalBig className="h-8 w-8 text-purple-400 group-hover:scale-110 transition-transform" />}
+                    </div>
+                    <h3 className="text-white font-medium mb-1">View Wage Records</h3>
+                    <p className="text-gray-400 text-sm">Review historical wage data</p>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center">
+              <div className="bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl p-12 max-w-2xl mx-auto">
+                <div className="w-20 h-20 bg-gradient-to-br from-blue-400 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <User className="h-10 w-10 text-white" />
+                </div>
+                <h2 className="text-3xl font-bold text-white mb-4">Welcome, Priyanka!</h2>
+                <p className="text-gray-400 text-lg mb-8">Manage Suva branch timesheets and related records using the navigation menu above.</p>
+                <div className="flex justify-center space-x-4">
+                  <div className="px-4 py-2 bg-blue-500/20 rounded-full">
+                    <span className="text-blue-400 text-sm">Timesheet Manager</span>
+                  </div>
+                  <div className="px-4 py-2 bg-green-500/20 rounded-full">
+                    <span className="text-green-400 text-sm">Suva Branch Access</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 };
 
 export default DashboardPage;
+
+    
